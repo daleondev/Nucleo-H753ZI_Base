@@ -77,7 +77,7 @@ namespace
 
     void TxMain(ULONG)
     {
-        const auto blink_period_ticks{ MillisecondsToTicks(1000) };
+        const auto blink_period_ticks{ MillisecondsToTicks(100) };
 
         while (true) {
             BSP_LED_Toggle(LED_GREEN);

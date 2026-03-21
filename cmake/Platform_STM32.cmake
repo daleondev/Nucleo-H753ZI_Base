@@ -1,7 +1,8 @@
 set(THREADX_ARCH cortex_m7)
 set(THREADX_TOOLCHAIN gnu)
-set(TX_ENABLE_STACK_CHECKING ON)
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/threadx)
+
+target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING)
 
 add_library(Platform INTERFACE)
 

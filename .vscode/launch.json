@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32H753ZI Debug",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/debug/Application.elf",
+            "loadFiles": [],
+            "device": "STM32H753ZI",
+            "servertype": "openocd",
+            "serverpath": "/usr/bin/openocd",
+            "gdbPath": "/usr/bin/arm-none-eabi-gdb",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32h7x.cfg"
+            ],
+            "searchDir": [
+                "/usr/share/openocd/scripts"
+            ],
+            "preLaunchTask": "Debug Prerequisites",
+            "rtos": "ThreadX",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        }
+    ]
+}

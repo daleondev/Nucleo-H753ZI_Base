@@ -25,7 +25,7 @@
         {
             "label": "Flash",
             "type": "shell",
-            "command": "openocd -f interface/stlink.cfg -f target/stm32h7x.cfg -c \"program ./build/debug/CANopenApp.elf verify reset exit\"",
+            "command": "openocd -f interface/stlink.cfg -f target/stm32h7x.cfg -c \"program ./build/debug/Application.elf verify reset exit\"",
             "presentation": {
                 "reveal": "always",
                 "panel": "shared"
@@ -33,34 +33,11 @@
             "problemMatcher": []
         },
         {
-            "label": "Start OpenOCD",
-            "type": "shell",
-            "command": "openocd -f interface/stlink.cfg -f target/stm32h7x.cfg",
-            "isBackground": true,
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            },
-            "problemMatcher": [
-                {
-                    "owner": "openocd",
-                    "pattern": {
-                        "regexp": "^(?!)"
-                    },
-                    "background": {
-                        "activeOnStart": true,
-                        "beginsPattern": ".*Open On-Chip Debugger.*",
-                        "endsPattern": ".*Listening on port 3333 for gdb connections.*"
-                    }
-                }
-            ]
-        },
-        {
             "label": "Debug Prerequisites",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "Build Debug",
-                "Start OpenOCD"
+                "Flash"
             ],
             "problemMatcher": []
         }
