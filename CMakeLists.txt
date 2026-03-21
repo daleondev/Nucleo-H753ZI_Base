@@ -1,27 +1,22 @@
 cmake_minimum_required(VERSION 3.22)
-
 project(Application LANGUAGES C CXX ASM)
 
-add_executable(${PROJECT_NAME})
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hal_compat)
 
-target_sources(${PROJECT_NAME}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/app/threadx_app.cpp
-)
+add_executable(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_sources(${PROJECT_NAME}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("cmake/Platform_Linux.cmake")
-
-    target_sources(${PROJECT_NAME}
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/main_linux.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/platform_linux.cpp
-    )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     set(TX_USER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
     include("cmake/Platform_STM32.cmake")
@@ -29,7 +24,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     target_sources(${PROJECT_NAME}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/platform_stm32.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/main.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/gpio.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/rng.c
@@ -57,6 +51,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} 
     PRIVATE
         Platform
+        HalCompat
 )
 
 target_compile_features(${PROJECT_NAME}
