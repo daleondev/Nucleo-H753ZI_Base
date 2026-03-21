@@ -13,23 +13,49 @@ Ensure you have the following installed on your host machine:
 * [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 * [OpenOCD](https://openocd.org/)
 
-## Build
+## Linux Simulation & Testing
 
-Configure and build with the provided preset:
+To accelerate development and enable continuous integration (CI) without requiring the physical Nucleo board, this project can be compiled and run natively as a simulated Linux application. 
+
+This is achieved by swapping the bare-metal ARM port of ThreadX for the ThreadX Linux/POSIX port, allowing your RTOS threads to run directly as a standard desktop process.
+
+### Build Presets
+
+The project now exposes explicit presets for both targets:
+
+* `debug-stm32`
+* `release-stm32`
+* `debug-linux`
+* `release-linux`
+
+### Build STM32 Firmware
 
 ```sh
-cmake --preset debug
-cmake --build --preset debug
+cmake --preset debug-stm32
+cmake --build --preset debug-stm32
 ```
 
-In VS Code, the workspace also exposes a `Build Debug` task.
+The STM32 artifacts are generated in `build/debug-stm32/`.
 
-## Flash and Debug
-
-Use OpenOCD to flash and debug the application:
+### Build Linux Simulation
 
 ```sh
-openocd -f interface/stlink.cfg -f target/stm32h7x.cfg
+cmake --preset debug-linux
+cmake --build --preset debug-linux
 ```
 
-In VS Code, the workspace also exposes a `Flash` task.
+The Linux executable is generated in `build/debug-linux/`.
+
+### Run Linux Simulation
+
+```sh
+./build/debug-linux/Application
+```
+
+### VS Code Tasks
+
+The workspace keeps the embedded debug flow intact and adds a Linux build task:
+
+* `Build Debug` configures and builds `debug-stm32`
+* `Flash` programs `build/debug-stm32/Application.elf`
+* `Build Debug Linux` configures and builds `debug-linux`

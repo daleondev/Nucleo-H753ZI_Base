@@ -12,23 +12,51 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake",
                 "CMAKE_MAKE_PROGRAM": "ninja",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         },
         {
-            "name": "debug",
-            "displayName": "Debug",
+            "name": "base-stm32",
+            "hidden": true,
             "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake"
+            }
+        },
+        {
+            "name": "base-linux",
+            "hidden": true,
+            "inherits": "base"
+        },
+        {
+            "name": "debug-stm32",
+            "displayName": "Debug STM32",
+            "inherits": "base-stm32",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
-            "name": "release",
-            "displayName": "Release",
-            "inherits": "base",
+            "name": "release-stm32",
+            "displayName": "Release STM32",
+            "inherits": "base-stm32",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "debug-linux",
+            "displayName": "Debug Linux",
+            "inherits": "base-linux",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release-linux",
+            "displayName": "Release Linux",
+            "inherits": "base-linux",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
@@ -36,12 +64,20 @@
     ],
     "buildPresets": [
         {
-            "name": "debug",
-            "configurePreset": "debug"
+            "name": "debug-stm32",
+            "configurePreset": "debug-stm32"
         },
         {
-            "name": "release",
-            "configurePreset": "release"
+            "name": "release-stm32",
+            "configurePreset": "release-stm32"
+        },
+        {
+            "name": "debug-linux",
+            "configurePreset": "debug-linux"
+        },
+        {
+            "name": "release-linux",
+            "configurePreset": "release-linux"
         }
     ]
 }
