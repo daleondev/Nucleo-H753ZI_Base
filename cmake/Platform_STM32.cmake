@@ -42,6 +42,7 @@ target_sources(Platform
 
 target_include_directories(Platform 
     INTERFACE
+        ${CMAKE_SOURCE_DIR}/external/CubeMX/Inc
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Inc
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Inc/Legacy
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-nucleo-bsp

@@ -1,4 +1,4 @@
-#include "hal_compat/target_hal.h"
+#include "hal_compat/platform_hal.hpp"
 
 #include <tx_api.h>
 

@@ -48,6 +48,16 @@ else()
     message(FATAL_ERROR "Unsupported target system: ${CMAKE_SYSTEM_NAME}")
 endif()
 
+target_include_directories(HalCompat
+    PUBLIC
+        $<TARGET_PROPERTY:Platform,INTERFACE_INCLUDE_DIRECTORIES>
+)
+
+target_compile_definitions(HalCompat
+    PUBLIC
+        $<TARGET_PROPERTY:Platform,INTERFACE_COMPILE_DEFINITIONS>
+)
+
 target_link_libraries(${PROJECT_NAME} 
     PRIVATE
         Platform

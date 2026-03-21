@@ -4,21 +4,6 @@
 extern "C" {
 #endif
 
-#if defined(HAL_COMPAT_STM32)
-
-#include "fdcan.h"
-#include "gpio.h"
-#include "main.h"
-#include "rng.h"
-#include "rtc.h"
-#include "tim.h"
-
-extern COM_InitTypeDef BspCOMInit;
-void SystemClock_Config(void);
-void MPU_Config_User(void);
-
-#elif defined(HAL_COMPAT_LINUX)
-
 #include <stdint.h>
 
 typedef enum
@@ -99,12 +84,6 @@ int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init);
 
 HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef* timer_handle);
 void Error_Handler(void);
-
-#else
-
-#error "Unsupported HalCompat platform"
-
-#endif
 
 #ifdef __cplusplus
 }

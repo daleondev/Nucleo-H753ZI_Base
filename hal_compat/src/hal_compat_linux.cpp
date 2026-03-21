@@ -1,4 +1,4 @@
-#include "hal_compat/target_hal.h"
+#include "hal_compat/hal_compat_linux.hpp"
 
 #include <array>
 #include <cstdio>
