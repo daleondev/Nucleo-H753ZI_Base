@@ -263,6 +263,7 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
+    BSP_LED_Toggle(LED_RED);
   }
   /* USER CODE END Error_Handler_Debug */
 }
