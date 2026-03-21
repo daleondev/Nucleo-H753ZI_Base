@@ -12,6 +12,7 @@ target_sources(Platform
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_cortex.c
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_eth.c
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_eth_ex.c
+        ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_fdcan.c
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_rcc.c
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_rcc_ex.c
         ${CMAKE_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_flash.c

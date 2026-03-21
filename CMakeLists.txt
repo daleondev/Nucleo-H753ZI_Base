@@ -1,10 +1,9 @@
-cmake_minimum_required(VERSION 4.0.0)
+cmake_minimum_required(VERSION 3.22)
 
-project(Application LANGUAGES CXX C ASM)
-set(CMAKE_PROJECT_NAME Application)
+project(Application LANGUAGES C CXX ASM)
 
 # --- Executable ---
-add_executable(${PROJECT_NAME} src/main.cpp)
+add_executable(${PROJECT_NAME})
 
 # --- Sources ---
 target_sources(${PROJECT_NAME} 
@@ -32,8 +31,6 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Inc
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/NetXDuo/App
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/NetXDuo/Target
 )
 
 set(TX_USER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
@@ -45,8 +42,8 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 target_compile_features(${PROJECT_NAME}
-    PUBLIC
-        cxx_std_23
+    PRIVATE
+        cxx_std_20
 )
 
 # --- Post-build steps ---
