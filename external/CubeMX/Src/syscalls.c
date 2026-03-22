@@ -29,6 +29,9 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <stdint.h>
+
+#include rng.h
 
 
 /* Variables */
@@ -173,6 +176,58 @@ int _execve(char *name, char **argv, char **env)
   (void)env;
   errno = ENOMEM;
   return -1;
+}
+
+int _getentropy(void *buffer, size_t length)
+{
+  uint8_t *out;
+  size_t generated;
+  uint32_t random_value;
+  size_t i;
+
+  if (length == 0U)
+  {
+    return 0;
+  }
+
+  if (buffer == NULL)
+  {
+    errno = EFAULT;
+    return -1;
+  }
+
+  if (length > 256U)
+  {
+    errno = EIO;
+    return -1;
+  }
+
+  if (hrng.Instance == NULL)
+  {
+    errno = EIO;
+    return -1;
+  }
+
+  out = (uint8_t *)buffer;
+  generated = 0U;
+
+  while (generated < length)
+  {
+    random_value = 0U;
+
+    if (HAL_RNG_GenerateRandomNumber(&hrng, &random_value) != HAL_OK)
+    {
+      errno = EIO;
+      return -1;
+    }
+
+    for (i = 0U; i < sizeof(random_value) && generated < length; ++i)
+    {
+      out[generated++] = (uint8_t)(random_value >> (i * 8U));
+    }
+  }
+
+  return 0;
 }
 
 // --- Picolibc Specific Section ---
