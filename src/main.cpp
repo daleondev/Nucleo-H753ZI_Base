@@ -57,7 +57,9 @@ extern "C" void tx_application_define(void* first_unused_memory)
 {
     static_cast<void>(first_unused_memory);
 
+#if !defined(HAL_COMPAT_LINUX)
     assertTxCall(tx_thread_stack_error_notify(threadStackErrorHandler));
+#endif
     assertTxCall(tx_thread_create(&main_thread,
                                   main_thread_name,
                                   txMain,

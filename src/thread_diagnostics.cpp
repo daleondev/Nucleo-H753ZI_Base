@@ -8,6 +8,10 @@
 
 #if defined(HAL_COMPAT_LINUX)
 #include <pthread.h>
+
+extern "C" {
+#include "tx_linux_stack_tracking.h"
+}
 #endif
 
 namespace thread_diagnostics
@@ -67,6 +71,10 @@ namespace thread_diagnostics
     void printAll()
     {
         std::printf("Threads info:\n");
+
+#if defined(HAL_COMPAT_LINUX)
+        _tx_linux_thread_stack_refresh_all();
+#endif
 
         auto* first_thread = _tx_thread_created_ptr;
         if (first_thread == TX_NULL || _tx_thread_created_count == 0U) {

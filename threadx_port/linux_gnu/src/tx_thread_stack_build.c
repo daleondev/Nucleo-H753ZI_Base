@@ -25,6 +25,10 @@
 
 #include "tx_api.h"
 #include "tx_thread.h"
+
+#include "tx_linux_stack_tracking.h"
+
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -75,6 +79,10 @@ void* _tx_linux_thread_entry(void* ptr);
 VOID _tx_thread_stack_build(TX_THREAD* thread_ptr, VOID (*function_ptr)(VOID))
 {
     struct sched_param sp;
+    pthread_attr_t attr;
+    VOID* host_stack_base;
+    size_t host_stack_size;
+    int status;
 
     (VOID) function_ptr;
 
@@ -89,9 +97,26 @@ VOID _tx_thread_stack_build(TX_THREAD* thread_ptr, VOID (*function_ptr)(VOID))
     }
 
     /* Create a Linux thread for the application thread.  */
-    pthread_attr_t attr;
+    status = (int)_tx_linux_thread_stack_prepare_host(thread_ptr);
+    if (status != TX_SUCCESS) {
+
+        printf("ThreadX Linux error preparing host stack for thread!\n");
+        while (1) {
+        }
+    }
+
+    host_stack_base = _tx_linux_thread_stack_host_base(thread_ptr);
+    host_stack_size = _tx_linux_thread_stack_host_size(thread_ptr);
+
     pthread_attr_init(&attr);
-    pthread_attr_setstack(&attr, thread_ptr->tx_thread_stack_start, thread_ptr->tx_thread_stack_size);
+    pthread_attr_setguardsize(&attr, 0);
+    status = pthread_attr_setstack(&attr, host_stack_base, host_stack_size);
+    if (status != 0) {
+
+        printf("ThreadX Linux error assigning pthread stack: %d\n", status);
+        while (1) {
+        }
+    }
     if (pthread_create(&thread_ptr->tx_thread_linux_thread_id, &attr, _tx_linux_thread_entry, thread_ptr)) {
 
         /* Display an error message.  */
@@ -99,6 +124,7 @@ VOID _tx_thread_stack_build(TX_THREAD* thread_ptr, VOID (*function_ptr)(VOID))
         while (1) {
         }
     }
+    pthread_attr_destroy(&attr);
 
     /* Otherwise, we have a good thread create.  */
     sp.sched_priority = TX_LINUX_PRIORITY_USER_THREAD;
@@ -126,6 +152,8 @@ void* _tx_linux_thread_entry(void* ptr)
 
     /* Pickup the current thread pointer.  */
     thread_ptr = (TX_THREAD*)ptr;
+    _tx_linux_thread_stack_register(thread_ptr);
+    _tx_linux_thread_stack_enable_signal_altstack(thread_ptr);
     _tx_linux_threadx_thread = 1;
     nice(20);
 
@@ -133,9 +161,12 @@ void* _tx_linux_thread_entry(void* ptr)
        been scheduled, this will return immediately.  */
     tx_linux_sem_wait(&thread_ptr->tx_thread_linux_thread_run_semaphore);
     tx_linux_sem_post_nolock(&_tx_linux_semaphore);
+    _tx_linux_thread_stack_calibrate(thread_ptr);
 
     /* Call ThreadX thread entry point.  */
     _tx_thread_shell_entry();
+
+    _tx_linux_thread_stack_unregister();
 
     return EXIT_SUCCESS;
 }
