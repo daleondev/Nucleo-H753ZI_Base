@@ -31,7 +31,7 @@
 #include <sys/times.h>
 #include <stdint.h>
 
-#include rng.h
+#include "rng.h"
 
 
 /* Variables */

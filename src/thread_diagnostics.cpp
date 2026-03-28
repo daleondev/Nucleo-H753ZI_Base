@@ -71,16 +71,11 @@ namespace thread_diagnostics
         template<size_t Size>
         struct FixedString
         {
-            constexpr explicit(false) FixedString(const char* str)
-            {
-                for (size_t i{}; i < Size; ++i) {
-                    data[i] = str[i];
-                }
-            }
+            constexpr explicit(false) FixedString(const char* str) { std::copy_n(str, Size, data.begin()); }
             constexpr auto operator<=>(const FixedString&) const = default;
-            constexpr explicit(false) operator std::string_view() const { return { std::data(data), Size }; }
+            constexpr explicit(false) operator std::string_view() const { return { data.data(), Size }; }
             constexpr auto size() const { return Size; }
-            char data[Size + 1uz]{};
+            std::array<char, Size + 1uz> data{};
         };
         template<class T, size_t Capacity, size_t Size = Capacity - 1>
         FixedString(const T (&str)[Capacity]) -> FixedString<Size>;
@@ -105,27 +100,27 @@ namespace thread_diagnostics
         static constexpr FixedString MID_BORDER_FMT{ "├─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┼─{}─┤" };
         static constexpr FixedString BOT_BORDER_FMT{ "└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘" };
 
-        static constexpr auto PRIO_HDR{ "Prio"sv };
-        static constexpr auto NAME_HDR{ "Name"sv };
-        static constexpr auto AVAIL_HDR{ "Available [bytes]"sv };
-        static constexpr auto CURR_HDR{ "Current [bytes]"sv };
-        static constexpr auto PEAK_HDR{ "Peak [bytes]"sv };
-        static constexpr auto USAGE_HDR{ "Usage [%]"sv };
-        static constexpr auto BAR_HDR{ "Stack-Usage Bar"sv };
+        static constexpr auto PRIO_HEADER{ "Prio"sv };
+        static constexpr auto NAME_HEADER{ "Name"sv };
+        static constexpr auto AVAIL_HEADER{ "Available [bytes]"sv };
+        static constexpr auto CURR_HEADER{ "Current [bytes]"sv };
+        static constexpr auto PEAK_HEADER{ "Peak [bytes]"sv };
+        static constexpr auto USAGE_HEADER{ "Usage [%]"sv };
+        static constexpr auto BAR_HEADER{ "Stack-Usage Bar"sv };
 
-        static constexpr auto PRIO_BORDER{ repeatStr<BORDER_SYMBOL, PRIO_HDR.length()>() };
-        static constexpr auto AVAIL_BORDER{ repeatStr<BORDER_SYMBOL, AVAIL_HDR.length()>() };
-        static constexpr auto CURR_BORDER{ repeatStr<BORDER_SYMBOL, CURR_HDR.length()>() };
-        static constexpr auto PEAK_BORDER{ repeatStr<BORDER_SYMBOL, PEAK_HDR.length()>() };
-        static constexpr auto USAGE_BORDER{ repeatStr<BORDER_SYMBOL, USAGE_HDR.length()>() };
+        static constexpr auto PRIO_BORDER{ repeatStr<BORDER_SYMBOL, PRIO_HEADER.length()>() };
+        static constexpr auto AVAIL_BORDER{ repeatStr<BORDER_SYMBOL, AVAIL_HEADER.length()>() };
+        static constexpr auto CURR_BORDER{ repeatStr<BORDER_SYMBOL, CURR_HEADER.length()>() };
+        static constexpr auto PEAK_BORDER{ repeatStr<BORDER_SYMBOL, PEAK_HEADER.length()>() };
+        static constexpr auto USAGE_BORDER{ repeatStr<BORDER_SYMBOL, USAGE_HEADER.length()>() };
         static constexpr auto BAR_BORDER{ repeatStr<BORDER_SYMBOL, BAR_WIDTH>() };
 
         template<FixedString Fmt>
-        std::string makeBorder(size_t name_len)
+        std::string makeBorder(std::string_view name_border)
         {
             return std::format(Fmt,
                                static_cast<std::string_view>(PRIO_BORDER),
-                               repeatStr("─"sv, name_len),
+                               name_border,
                                static_cast<std::string_view>(AVAIL_BORDER),
                                static_cast<std::string_view>(CURR_BORDER),
                                static_cast<std::string_view>(PEAK_BORDER),
@@ -136,12 +131,12 @@ namespace thread_diagnostics
         // clang-format off
         std::string formatRow(auto prio, std::string_view name, size_t name_len, auto avail, auto curr, auto peak, auto usage, std::string_view bar) {
             return std::format("│ {:>{}} │ {:<{}} │ {:>{}} │ {:>{}} │ {:>{}} │ {:>{}} │ {:<{}} │",
-                prio,  PRIO_HDR.length(),
+                prio,  PRIO_HEADER.length(),
                 name,  name_len,
-                avail, AVAIL_HDR.length(),
-                curr,  CURR_HDR.length(),
-                peak,  PEAK_HDR.length(),
-                usage, USAGE_HDR.length(),
+                avail, AVAIL_HEADER.length(),
+                curr,  CURR_HEADER.length(),
+                peak,  PEAK_HEADER.length(),
+                usage, USAGE_HEADER.length(),
                 bar,   BAR_WIDTH
             );
         };
@@ -156,7 +151,7 @@ namespace thread_diagnostics
 
         auto threads_info{ getAllThreadsInformation() };
         if (threads_info.empty()) {
-            std::printf("No threads running...\n");
+            std::printf("No threads running...\r\n");
             std::fflush(stdout);
             return;
         }
@@ -164,19 +159,26 @@ namespace thread_diagnostics
         std::ranges::sort(threads_info, std::ranges::less{}, &ThreadInfo::prio);
 
         auto max_name_len{ std::max(
-          NAME_HDR.size(), std::ranges::max(threads_info | std::views::transform([](const ThreadInfo& s) {
+          NAME_HEADER.size(), std::ranges::max(threads_info | std::views::transform([](const ThreadInfo& s) {
             return s.name.length();
         }))) };
+        auto name_border{ repeatStr(BORDER_SYMBOL, max_name_len) };
 
-        auto top_border{ makeBorder<TOP_BORDER_FMT>(max_name_len) };
-        auto mid_border{ makeBorder<MID_BORDER_FMT>(max_name_len) };
-        auto bot_border{ makeBorder<BOT_BORDER_FMT>(max_name_len) };
+        auto top_border{ makeBorder<TOP_BORDER_FMT>(name_border) };
+        auto mid_border{ makeBorder<MID_BORDER_FMT>(name_border) };
+        auto bot_border{ makeBorder<BOT_BORDER_FMT>(name_border) };
 
-        auto header{ formatRow(
-          PRIO_HDR, NAME_HDR, max_name_len, AVAIL_HDR, CURR_HDR, PEAK_HDR, USAGE_HDR, BAR_HDR) };
+        auto header{ formatRow(PRIO_HEADER,
+                               NAME_HEADER,
+                               max_name_len,
+                               AVAIL_HEADER,
+                               CURR_HEADER,
+                               PEAK_HEADER,
+                               USAGE_HEADER,
+                               BAR_HEADER) };
 
-        std::printf("%s\n", top_border.c_str());
-        std::printf("%s\n", header.c_str());
+        std::printf("%s\r\n", top_border.c_str());
+        std::printf("%s\r\n", header.c_str());
 
         // thread infos
         for (const auto& thread : threads_info) {
@@ -192,11 +194,11 @@ namespace thread_diagnostics
                                  current_usage_percent,
                                  repeatStr("█"sv, bar_length) + repeatStr("░"sv, BAR_WIDTH - bar_length)) };
 
-            std::printf("%s\n", mid_border.c_str());
-            std::printf("%s\n", info.c_str());
+            std::printf("%s\r\n", mid_border.c_str());
+            std::printf("%s\r\n", info.c_str());
         }
 
-        std::printf("%s\n", bot_border.c_str());
+        std::printf("%s\r\n", bot_border.c_str());
         std::fflush(stdout);
     }
 } // namespace thread_diagnostics
