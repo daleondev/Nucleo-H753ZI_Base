@@ -9,6 +9,7 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
+
 /**************************************************************************/
 /**************************************************************************/
 /**                                                                       */
@@ -19,53 +20,52 @@
 /**************************************************************************/
 /**************************************************************************/
 
+
 #define TX_SOURCE_CODE
+
 
 /* Include necessary system files.  */
 
 #include "tx_api.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/sysinfo.h>
 
 #include "tx_linux_stack_tracking.h"
 
-#include <errno.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/sysinfo.h>
-#include <unistd.h>
-
 /* Define various Linux objects used by the ThreadX port.  */
 
-pthread_mutex_t _tx_linux_mutex;
-sem_t _tx_linux_semaphore;
-sem_t _tx_linux_semaphore_no_idle;
-ULONG _tx_linux_global_int_disabled_flag;
-struct timespec _tx_linux_time_stamp;
-__thread int _tx_linux_threadx_thread = 0;
+pthread_mutex_t     _tx_linux_mutex;
+sem_t               _tx_linux_semaphore;
+sem_t               _tx_linux_semaphore_no_idle;
+ULONG               _tx_linux_global_int_disabled_flag;
+struct timespec     _tx_linux_time_stamp;
+__thread int        _tx_linux_threadx_thread = 0;
 
 /* Define signals for linux thread. */
 #define SUSPEND_SIG SIGUSR1
-#define RESUME_SIG SIGUSR2
-#define SNAPSHOT_SIG SIGRTMIN
+#define RESUME_SIG  SIGUSR2
 
-static sigset_t _tx_linux_thread_wait_mask;
+static sigset_t     _tx_linux_thread_wait_mask;
 static __thread int _tx_linux_thread_suspended;
-static sem_t _tx_linux_thread_timer_wait;
-static sem_t _tx_linux_thread_other_wait;
+static sem_t        _tx_linux_thread_timer_wait;
+static sem_t        _tx_linux_thread_other_wait;
 
 /* Define simulated timer interrupt.  This is done inside a thread, which is
    how other interrupts may be defined as well.  See code below for an
    example.  */
 
-pthread_t _tx_linux_timer_id;
-sem_t _tx_linux_timer_semaphore;
-sem_t _tx_linux_isr_semaphore;
-void* _tx_linux_timer_interrupt(void* p);
+pthread_t           _tx_linux_timer_id;
+sem_t               _tx_linux_timer_semaphore;
+sem_t               _tx_linux_isr_semaphore;
+void               *_tx_linux_timer_interrupt(void *p);
 
-void _tx_linux_thread_resume_handler(int sig, siginfo_t* info, void* context);
-void _tx_linux_thread_suspend_handler(int sig, siginfo_t* info, void* context);
-void _tx_linux_thread_snapshot_handler(int sig, siginfo_t* info, void* context);
-void _tx_linux_thread_suspend(pthread_t thread_id);
+void    _tx_linux_thread_resume_handler(int sig, siginfo_t* info, void* context);
+void    _tx_linux_thread_suspend_handler(int sig, siginfo_t* info, void* context);
+void    _tx_linux_thread_suspend(pthread_t thread_id);
 
 #ifdef TX_LINUX_DEBUG_ENABLE
 
@@ -73,40 +73,44 @@ void _tx_linux_thread_suspend(pthread_t thread_id);
 
 typedef struct TX_LINUX_DEBUG_ENTRY_STRUCT
 {
-    char* tx_linux_debug_entry_action;
-    struct timespec tx_linux_debug_entry_timestamp;
-    char* tx_linux_debug_entry_file;
-    unsigned long tx_linux_debug_entry_line;
-    pthread_mutex_t tx_linux_debug_entry_mutex;
-    unsigned long tx_linux_debug_entry_int_disabled_flag;
-    ULONG tx_linux_debug_entry_system_state;
-    UINT tx_linux_debug_entry_preempt_disable;
-    TX_THREAD* tx_linux_debug_entry_current_thread;
-    TX_THREAD* tx_linux_debug_entry_execute_thread;
+    char                *tx_linux_debug_entry_action;
+    struct timespec     tx_linux_debug_entry_timestamp;
+    char                *tx_linux_debug_entry_file;
+    unsigned long       tx_linux_debug_entry_line;
+    pthread_mutex_t     tx_linux_debug_entry_mutex;
+    unsigned long       tx_linux_debug_entry_int_disabled_flag;
+    ULONG               tx_linux_debug_entry_system_state;
+    UINT                tx_linux_debug_entry_preempt_disable;
+    TX_THREAD           *tx_linux_debug_entry_current_thread;
+    TX_THREAD           *tx_linux_debug_entry_execute_thread;
 } TX_LINUX_DEBUG_ENTRY;
+
 
 /* Define the maximum size of the Linux debug array.  */
 
 #ifndef TX_LINUX_DEBUG_EVENT_SIZE
-#define TX_LINUX_DEBUG_EVENT_SIZE 400
+#define TX_LINUX_DEBUG_EVENT_SIZE       400
 #endif
+
 
 /* Define the circular array of Linux debug entries.  */
 
-TX_LINUX_DEBUG_ENTRY _tx_linux_debug_entry_array[TX_LINUX_DEBUG_EVENT_SIZE];
+TX_LINUX_DEBUG_ENTRY    _tx_linux_debug_entry_array[TX_LINUX_DEBUG_EVENT_SIZE];
+
 
 /* Define the Linux debug index.  */
 
-unsigned long _tx_linux_debug_entry_index = 0;
+unsigned long           _tx_linux_debug_entry_index =  0;
+
 
 /* Now define the debug entry function.  */
-void _tx_linux_debug_entry_insert(char* action, char* file, unsigned long line)
+void    _tx_linux_debug_entry_insert(char *action, char *file, unsigned long line)
 {
 
-    pthread_mutex_t temp_copy;
+pthread_mutex_t        temp_copy;
 
     /* Save the current critical section value.  */
-    temp_copy = _tx_linux_mutex;
+    temp_copy =  _tx_linux_mutex;
 
     /* Lock mutex.  */
     tx_linux_mutex_lock(_tx_linux_mutex);
@@ -115,31 +119,26 @@ void _tx_linux_debug_entry_insert(char* action, char* file, unsigned long line)
     clock_gettime(CLOCK_REALTIME, &_tx_linux_time_stamp);
 
     /* Setup the debub entry.  */
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_action = action;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_timestamp =
-      _tx_linux_time_stamp;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_file = file;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_line = line;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_mutex = temp_copy;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_int_disabled_flag =
-      _tx_linux_global_int_disabled_flag;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_system_state =
-      _tx_thread_system_state;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_preempt_disable =
-      _tx_thread_preempt_disable;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_current_thread =
-      _tx_thread_current_ptr;
-    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_execute_thread =
-      _tx_thread_execute_ptr;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_action =             action;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_timestamp =          _tx_linux_time_stamp;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_file =               file;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_line =               line;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_mutex =              temp_copy;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_int_disabled_flag =  _tx_linux_global_int_disabled_flag;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_system_state =       _tx_thread_system_state;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_preempt_disable =    _tx_thread_preempt_disable;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_current_thread =     _tx_thread_current_ptr;
+    _tx_linux_debug_entry_array[_tx_linux_debug_entry_index].tx_linux_debug_entry_execute_thread =     _tx_thread_execute_ptr;
 
     /* Now move to the next entry.  */
     _tx_linux_debug_entry_index++;
 
     /* Determine if we need to wrap the list.  */
-    if (_tx_linux_debug_entry_index >= TX_LINUX_DEBUG_EVENT_SIZE) {
+    if (_tx_linux_debug_entry_index >= TX_LINUX_DEBUG_EVENT_SIZE)
+    {
 
         /* Yes, wrap the list!  */
-        _tx_linux_debug_entry_index = 0;
+        _tx_linux_debug_entry_index =  0;
     }
 
     /* Unlock mutex.  */
@@ -148,19 +147,23 @@ void _tx_linux_debug_entry_insert(char* action, char* file, unsigned long line)
 
 #endif
 
+
 /* Define the ThreadX timer interrupt handler.  */
 
-void _tx_timer_interrupt(void);
+void    _tx_timer_interrupt(void);
+
 
 /* Define other external function references.  */
 
-VOID _tx_initialize_low_level(VOID);
-VOID _tx_thread_context_save(VOID);
-VOID _tx_thread_context_restore(VOID);
+VOID    _tx_initialize_low_level(VOID);
+VOID    _tx_thread_context_save(VOID);
+VOID    _tx_thread_context_restore(VOID);
+
 
 /* Define other external variable references.  */
 
-extern VOID* _tx_initialize_unused_memory;
+extern VOID     *_tx_initialize_unused_memory;
+
 
 /**************************************************************************/
 /*                                                                        */
@@ -206,7 +209,7 @@ extern VOID* _tx_initialize_unused_memory;
 /*    _tx_initialize_kernel_enter           ThreadX entry function        */
 /*                                                                        */
 /**************************************************************************/
-VOID _tx_initialize_low_level(VOID)
+VOID   _tx_initialize_low_level(VOID)
 {
     struct sched_param sp;
     pthread_mutexattr_t attr;
@@ -215,18 +218,21 @@ VOID _tx_initialize_low_level(VOID)
     cpu_set_t mask;
 
     sched_getaffinity(getpid(), sizeof(mask), &mask);
-    if (CPU_COUNT(&mask) > 1) {
+    if (CPU_COUNT(&mask) > 1)
+    {
 
         srand((ULONG)pthread_self());
 
         /* Limit this ThreadX simulation on Linux to a single core.  */
         CPU_ZERO(&mask);
         CPU_SET(rand() % get_nprocs(), &mask);
-        if (sched_setaffinity(getpid(), sizeof(mask), &mask) != 0) {
+        if (sched_setaffinity(getpid(), sizeof(mask), &mask) != 0)
+        {
 
             /* Error restricting the process to one core.  */
             printf("ThreadX Linux error restricting the process to one core!\n");
-            while (1) {
+            while(1)
+            {
             }
         }
     }
@@ -235,11 +241,10 @@ VOID _tx_initialize_low_level(VOID)
     /* Pickup the first available memory address.  */
 
     /* Save the first available memory address.  */
-    _tx_initialize_unused_memory = malloc(TX_LINUX_MEMORY_SIZE);
+    _tx_initialize_unused_memory =  malloc(TX_LINUX_MEMORY_SIZE);
 
     /* Init Linux thread. */
     _tx_linux_thread_init();
-    _tx_linux_thread_stack_system_initialize();
 
     /* Set priority and schedual of main thread. */
     sp.sched_priority = TX_LINUX_PRIORITY_SCHEDULE;
@@ -257,7 +262,7 @@ VOID _tx_initialize_low_level(VOID)
 #endif /* TX_LINUX_NO_IDLE_ENABLE */
 
     /* Initialize the global interrupt disabled flag.  */
-    _tx_linux_global_int_disabled_flag = TX_FALSE;
+    _tx_linux_global_int_disabled_flag =  TX_FALSE;
 
     /* Create semaphore for timer thread. */
     sem_init(&_tx_linux_timer_semaphore, 0, 0);
@@ -266,11 +271,13 @@ VOID _tx_initialize_low_level(VOID)
     sem_init(&_tx_linux_isr_semaphore, 0, 0);
 
     /* Setup periodic timer interrupt.  */
-    if (pthread_create(&_tx_linux_timer_id, NULL, _tx_linux_timer_interrupt, NULL)) {
+    if(pthread_create(&_tx_linux_timer_id, NULL, _tx_linux_timer_interrupt, NULL))
+    {
 
         /* Error creating the timer interrupt.  */
         printf("ThreadX Linux error creating timer interrupt thread!\n");
-        while (1) {
+        while(1)
+        {
         }
     }
 
@@ -283,11 +290,12 @@ VOID _tx_initialize_low_level(VOID)
     /* Done, return to caller.  */
 }
 
+
 /* This routine is called after initialization is complete in order to start
    all interrupt threads.  Interrupt threads in addition to the timer may
    be added to this routine as well.  */
 
-void _tx_initialize_start_interrupts(void)
+void    _tx_initialize_start_interrupts(void)
 {
 
     /* Kick the timer thread off to generate the ThreadX periodic interrupt
@@ -295,16 +303,17 @@ void _tx_initialize_start_interrupts(void)
     tx_linux_sem_post(&_tx_linux_timer_semaphore);
 }
 
+
 /* Define the ThreadX system timer interrupt.  Other interrupts may be simulated
    in a similar way.  */
 
-void* _tx_linux_timer_interrupt(void* p)
+void    *_tx_linux_timer_interrupt(void *p)
 {
     struct timespec ts;
     long timer_periodic_nsec;
     int err;
 
-    (VOID) p;
+    (VOID)p;
 
     /* Calculate periodic timer. */
     timer_periodic_nsec = 1000000000 / TX_TIMER_TICKS_PER_SECOND;
@@ -313,16 +322,20 @@ void* _tx_linux_timer_interrupt(void* p)
     /* Wait startup semaphore. */
     tx_linux_sem_wait(&_tx_linux_timer_semaphore);
 
-    while (1) {
+    while(1)
+    {
 
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_nsec += timer_periodic_nsec;
-        if (ts.tv_nsec > 1000000000) {
+        if (ts.tv_nsec > 1000000000)
+        {
             ts.tv_nsec -= 1000000000;
             ts.tv_sec++;
         }
-        do {
-            if (sem_timedwait(&_tx_linux_timer_semaphore, &ts) == 0) {
+        do
+        {
+            if (sem_timedwait(&_tx_linux_timer_semaphore, &ts) == 0)
+            {
                 break;
             }
             err = errno;
@@ -347,8 +360,7 @@ void* _tx_linux_timer_interrupt(void* p)
         tx_linux_mutex_lock(_tx_linux_mutex);
 
         /* Make sure semaphore is 0. */
-        while (!sem_trywait(&_tx_linux_semaphore_no_idle))
-            ;
+        while(!sem_trywait(&_tx_linux_semaphore_no_idle));
 
         /* Wakeup the system thread by setting the system semaphore.  */
         tx_linux_sem_post(&_tx_linux_semaphore_no_idle);
@@ -375,12 +387,12 @@ void _tx_linux_thread_suspend_handler(int sig, siginfo_t* info, void* context)
         _tx_linux_thread_stack_capture_signal_context(context);
     }
 
-    if (pthread_equal(pthread_self(), _tx_linux_timer_id))
+    if(pthread_equal(pthread_self(), _tx_linux_timer_id))
         tx_linux_sem_post_nolock(&_tx_linux_thread_timer_wait);
     else
         tx_linux_sem_post_nolock(&_tx_linux_thread_other_wait);
 
-    if (_tx_linux_thread_suspended)
+    if(_tx_linux_thread_suspended)
         return;
 
     _tx_linux_thread_suspended = 1;
@@ -388,17 +400,7 @@ void _tx_linux_thread_suspend_handler(int sig, siginfo_t* info, void* context)
     _tx_linux_thread_suspended = 0;
 }
 
-void _tx_linux_thread_snapshot_handler(int sig, siginfo_t* info, void* context)
-{
-    (VOID) sig;
-    (VOID) info;
-
-    if (_tx_linux_threadx_thread) {
-        _tx_linux_thread_stack_capture_snapshot_signal(context);
-    }
-}
-
-void _tx_linux_thread_suspend(pthread_t thread_id)
+void    _tx_linux_thread_suspend(pthread_t thread_id)
 {
 
     /* Send signal. */
@@ -407,13 +409,13 @@ void _tx_linux_thread_suspend(pthread_t thread_id)
     tx_linux_mutex_unlock(_tx_linux_mutex);
 
     /* Wait until signal is received. */
-    if (pthread_equal(thread_id, _tx_linux_timer_id))
+    if(pthread_equal(thread_id, _tx_linux_timer_id))
         tx_linux_sem_wait(&_tx_linux_thread_timer_wait);
     else
         tx_linux_sem_wait(&_tx_linux_thread_other_wait);
 }
 
-void _tx_linux_thread_resume(pthread_t thread_id)
+void    _tx_linux_thread_resume(pthread_t thread_id)
 {
 
     /* Send signal. */
@@ -422,7 +424,7 @@ void _tx_linux_thread_resume(pthread_t thread_id)
     tx_linux_mutex_unlock(_tx_linux_mutex);
 }
 
-void _tx_linux_thread_init()
+void    _tx_linux_thread_init()
 {
     struct sigaction sa;
 
@@ -432,7 +434,6 @@ void _tx_linux_thread_init()
 
     sigfillset(&_tx_linux_thread_wait_mask);
     sigdelset(&_tx_linux_thread_wait_mask, RESUME_SIG);
-    sigdelset(&_tx_linux_thread_wait_mask, SNAPSHOT_SIG);
 
     sigfillset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
@@ -441,7 +442,6 @@ void _tx_linux_thread_init()
 
     sa.sa_sigaction = _tx_linux_thread_suspend_handler;
     sigaction(SUSPEND_SIG, &sa, NULL);
-
-    sa.sa_sigaction = _tx_linux_thread_snapshot_handler;
-    sigaction(SNAPSHOT_SIG, &sa, NULL);
 }
+
+

@@ -25,8 +25,6 @@ VOID _tx_linux_thread_stack_register(TX_THREAD* thread_ptr);
 VOID _tx_linux_thread_stack_unregister(VOID);
 VOID _tx_linux_thread_stack_capture_current(TX_THREAD* thread_ptr);
 VOID _tx_linux_thread_stack_capture_signal_context(VOID* context);
-VOID _tx_linux_thread_stack_capture_snapshot_signal(VOID* context);
-VOID _tx_linux_thread_stack_system_initialize(VOID);
 UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr);
 VOID _tx_linux_thread_stack_enable_signal_altstack(TX_THREAD* thread_ptr);
 VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr);

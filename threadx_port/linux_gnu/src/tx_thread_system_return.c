@@ -9,6 +9,7 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
+
 /**************************************************************************/
 /**************************************************************************/
 /**                                                                       */
@@ -19,17 +20,17 @@
 /**************************************************************************/
 /**************************************************************************/
 
-#define TX_SOURCE_CODE
+#define    TX_SOURCE_CODE
+
 
 /* Include necessary system files.  */
 
 #include "tx_api.h"
 #include "tx_thread.h"
 #include "tx_timer.h"
+#include <stdio.h>
 
 #include "tx_linux_stack_tracking.h"
-
-#include <stdio.h>
 
 /**************************************************************************/
 /*                                                                        */
@@ -75,14 +76,14 @@
 /*    ThreadX components                                                  */
 /*                                                                        */
 /**************************************************************************/
-VOID _tx_thread_system_return(VOID)
+VOID   _tx_thread_system_return(VOID)
 {
 
-    TX_THREAD* temp_thread_ptr;
-    sem_t* temp_run_semaphore;
-    UINT temp_thread_state;
-    pthread_t thread_id;
-    int exit_code = 0;
+TX_THREAD   *temp_thread_ptr;
+sem_t       *temp_run_semaphore;
+UINT        temp_thread_state;
+pthread_t   thread_id;
+int         exit_code = 0;
 
     if ((_tx_linux_threadx_thread) && (_tx_thread_current_ptr != TX_NULL)) {
         _tx_linux_thread_stack_capture_current(_tx_thread_current_ptr);
@@ -100,40 +101,42 @@ VOID _tx_thread_system_return(VOID)
     thread_id = pthread_self();
 
     /* Pickup the current thread pointer.  */
-    temp_thread_ptr = _tx_thread_current_ptr;
+    temp_thread_ptr =  _tx_thread_current_ptr;
 
     /* Determine if this is a thread (0) and it does not
        match the current thread pointer.  */
     if ((_tx_linux_threadx_thread) &&
-        ((!temp_thread_ptr) || (!pthread_equal(temp_thread_ptr->tx_thread_linux_thread_id, thread_id)))) {
+        ((!temp_thread_ptr) || (!pthread_equal(temp_thread_ptr -> tx_thread_linux_thread_id, thread_id))))
+    {
 
         /* This indicates the Linux thread was actually terminated by ThreadX is only
            being allowed to run in order to cleanup its resources.  */
         /* Unlock linux mutex. */
         tx_linux_mutex_recursive_unlock(_tx_linux_mutex);
         _tx_linux_thread_stack_unregister();
-        pthread_exit((void*)&exit_code);
+        pthread_exit((void *)&exit_code);
     }
 
     /* Determine if the time-slice is active.  */
-    if (_tx_timer_time_slice) {
+    if (_tx_timer_time_slice)
+    {
 
         /* Preserve current remaining time-slice for the thread and clear the current time-slice.  */
-        temp_thread_ptr->tx_thread_time_slice = _tx_timer_time_slice;
-        _tx_timer_time_slice = 0;
+        temp_thread_ptr -> tx_thread_time_slice =  _tx_timer_time_slice;
+        _tx_timer_time_slice =  0;
     }
 
     /* Save the run semaphore into a temporary variable as well.  */
-    temp_run_semaphore = &temp_thread_ptr->tx_thread_linux_thread_run_semaphore;
+    temp_run_semaphore =  &temp_thread_ptr -> tx_thread_linux_thread_run_semaphore;
 
     /* Pickup the current thread state.  */
-    temp_thread_state = temp_thread_ptr->tx_thread_state;
+    temp_thread_state =  temp_thread_ptr -> tx_thread_state;
 
     /* Setup the suspension type for this thread.  */
-    temp_thread_ptr->tx_thread_linux_suspension_type = 0;
+    temp_thread_ptr -> tx_thread_linux_suspension_type  =  0;
 
     /* Set the current thread pointer to NULL.  */
-    _tx_thread_current_ptr = TX_NULL;
+    _tx_thread_current_ptr =  TX_NULL;
 
     /* Unlock Linux mutex.  */
     tx_linux_mutex_recursive_unlock(_tx_linux_mutex);
@@ -142,8 +145,7 @@ VOID _tx_thread_system_return(VOID)
     _tx_linux_debug_entry_insert("SYSTEM_RETURN-release_sem", __FILE__, __LINE__);
 
     /* Make sure semaphore is 0. */
-    while (!sem_trywait(&_tx_linux_semaphore))
-        ;
+    while(!sem_trywait(&_tx_linux_semaphore));
 
     /* Release the semaphore that the main scheduling thread is waiting
        on.  Note that the main scheduling algorithm will take care of
@@ -151,11 +153,12 @@ VOID _tx_thread_system_return(VOID)
     tx_linux_sem_post(&_tx_linux_semaphore);
 
     /* Determine if the thread was self-terminating.  */
-    if (temp_thread_state == TX_TERMINATED) {
+    if (temp_thread_state ==  TX_TERMINATED)
+    {
 
         /* Exit the thread instead of waiting on the semaphore!  */
         _tx_linux_thread_stack_unregister();
-        pthread_exit((void*)&exit_code);
+        pthread_exit((void *)&exit_code);
     }
 
     /* Wait on the run semaphore for this thread.  This won't get set again
@@ -172,12 +175,13 @@ VOID _tx_thread_system_return(VOID)
     /* Determine if the thread was terminated.  */
 
     /* Pickup the current thread pointer.  */
-    temp_thread_ptr = _tx_thread_current_ptr;
+    temp_thread_ptr =  _tx_thread_current_ptr;
 
     /* Determine if this is a thread and it does not
        match the current thread pointer.  */
     if ((_tx_linux_threadx_thread) &&
-        ((!temp_thread_ptr) || (!pthread_equal(temp_thread_ptr->tx_thread_linux_thread_id, thread_id)))) {
+        ((!temp_thread_ptr) || (!pthread_equal(temp_thread_ptr -> tx_thread_linux_thread_id, thread_id))))
+    {
 
         /* Unlock Linux mutex.  */
         tx_linux_mutex_recursive_unlock(_tx_linux_mutex);
@@ -185,7 +189,7 @@ VOID _tx_thread_system_return(VOID)
         /* This indicates the Linux thread was actually terminated by ThreadX and is only
            being allowed to run in order to cleanup its resources.  */
         _tx_linux_thread_stack_unregister();
-        pthread_exit((void*)&exit_code);
+        pthread_exit((void *)&exit_code);
     }
 
     /* Now determine if the application thread last had interrupts disabled.  */

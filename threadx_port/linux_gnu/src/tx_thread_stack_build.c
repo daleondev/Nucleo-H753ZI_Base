@@ -9,6 +9,7 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
+
 /**************************************************************************/
 /**************************************************************************/
 /**                                                                       */
@@ -19,22 +20,23 @@
 /**************************************************************************/
 /**************************************************************************/
 
+
 #define TX_SOURCE_CODE
+
 
 /* Include necessary system files.  */
 
 #include "tx_api.h"
 #include "tx_thread.h"
-
-#include "tx_linux_stack_tracking.h"
-
-#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 
+#include "tx_linux_stack_tracking.h"
+
 /* Prototype for new thread entry function.  */
 
-void* _tx_linux_thread_entry(void* ptr);
+void *_tx_linux_thread_entry(void *ptr);
+
 
 /**************************************************************************/
 /*                                                                        */
@@ -76,7 +78,7 @@ void* _tx_linux_thread_entry(void* ptr);
 /*    _tx_thread_reset                      Reset thread service          */
 /*                                                                        */
 /**************************************************************************/
-VOID _tx_thread_stack_build(TX_THREAD* thread_ptr, VOID (*function_ptr)(VOID))
+VOID   _tx_thread_stack_build(TX_THREAD *thread_ptr, VOID (*function_ptr)(VOID))
 {
     struct sched_param sp;
     pthread_attr_t attr;
@@ -84,74 +86,79 @@ VOID _tx_thread_stack_build(TX_THREAD* thread_ptr, VOID (*function_ptr)(VOID))
     size_t host_stack_size;
     int status;
 
-    (VOID) function_ptr;
+    (VOID)function_ptr;
 
     /* Create the run semaphore for the thread.  This will allow the scheduler
        control over when the thread actually runs.  */
-    if (sem_init(&thread_ptr->tx_thread_linux_thread_run_semaphore, 0, 0)) {
+    if(sem_init(&thread_ptr -> tx_thread_linux_thread_run_semaphore, 0, 0))
+    {
 
         /* Display an error message.  */
         printf("ThreadX Linux error creating thread running semaphore!\n");
-        while (1) {
+        while(1)
+        {
         }
     }
 
     /* Create a Linux thread for the application thread.  */
-    status = (int)_tx_linux_thread_stack_prepare_host(thread_ptr);
-    if (status != TX_SUCCESS) {
-
+    if(_tx_linux_thread_stack_prepare_host(thread_ptr) != TX_SUCCESS) 
+    {
         printf("ThreadX Linux error preparing host stack for thread!\n");
-        while (1) {
+        while(1)
+        {
         }
     }
-
     host_stack_base = _tx_linux_thread_stack_host_base(thread_ptr);
     host_stack_size = _tx_linux_thread_stack_host_size(thread_ptr);
 
     pthread_attr_init(&attr);
     pthread_attr_setguardsize(&attr, 0);
-    status = pthread_attr_setstack(&attr, host_stack_base, host_stack_size);
-    if (status != 0) {
-
-        printf("ThreadX Linux error assigning pthread stack: %d\n", status);
-        while (1) {
+    if(pthread_attr_setstack(&attr, host_stack_base, host_stack_size)) 
+    {
+        printf("ThreadX Linux error assigning pthread stack!\n");
+        while(1)
+        {
         }
     }
-    if (pthread_create(&thread_ptr->tx_thread_linux_thread_id, &attr, _tx_linux_thread_entry, thread_ptr)) {
+
+    if(pthread_create(&thread_ptr -> tx_thread_linux_thread_id, &attr, _tx_linux_thread_entry, thread_ptr))
+    {
 
         /* Display an error message.  */
         printf("ThreadX Linux error creating thread!\n");
-        while (1) {
+        while(1)
+        {
         }
     }
     pthread_attr_destroy(&attr);
 
     /* Otherwise, we have a good thread create.  */
     sp.sched_priority = TX_LINUX_PRIORITY_USER_THREAD;
-    pthread_setschedparam(thread_ptr->tx_thread_linux_thread_id, SCHED_FIFO, &sp);
+    pthread_setschedparam(thread_ptr -> tx_thread_linux_thread_id, SCHED_FIFO, &sp);
 
     /* Setup the thread suspension type to solicited thread suspension.
        Pseudo interrupt handlers will suspend with this field set to 1.  */
-    thread_ptr->tx_thread_linux_suspension_type = 0;
+    thread_ptr -> tx_thread_linux_suspension_type =  0;
 
     /* Clear the disabled count that will keep track of the
        tx_interrupt_control nesting.  */
-    thread_ptr->tx_thread_linux_int_disabled_flag = 0;
+    thread_ptr -> tx_thread_linux_int_disabled_flag =  0;
 
     /* Setup a fake thread stack pointer.   */
-    thread_ptr->tx_thread_stack_ptr = (VOID*)(((CHAR*)thread_ptr->tx_thread_stack_end) - 8);
+    thread_ptr -> tx_thread_stack_ptr =  (VOID *) (((CHAR *) thread_ptr -> tx_thread_stack_end) - 8);
 
     /* Clear the first word of the stack.  */
-    *(((ULONG*)thread_ptr->tx_thread_stack_ptr) - 1) = 0;
+    *(((ULONG *) thread_ptr -> tx_thread_stack_ptr) - 1) =  0;
 }
 
-void* _tx_linux_thread_entry(void* ptr)
+
+void *_tx_linux_thread_entry(void *ptr)
 {
 
-    TX_THREAD* thread_ptr;
+TX_THREAD  *thread_ptr;
 
     /* Pickup the current thread pointer.  */
-    thread_ptr = (TX_THREAD*)ptr;
+    thread_ptr =  (TX_THREAD *) ptr;
     _tx_linux_thread_stack_register(thread_ptr);
     _tx_linux_thread_stack_enable_signal_altstack(thread_ptr);
     _tx_linux_threadx_thread = 1;
@@ -159,7 +166,7 @@ void* _tx_linux_thread_entry(void* ptr)
 
     /* Now suspend the thread initially.  If the thread has already
        been scheduled, this will return immediately.  */
-    tx_linux_sem_wait(&thread_ptr->tx_thread_linux_thread_run_semaphore);
+    tx_linux_sem_wait(&thread_ptr -> tx_thread_linux_thread_run_semaphore);
     tx_linux_sem_post_nolock(&_tx_linux_semaphore);
     _tx_linux_thread_stack_calibrate(thread_ptr);
 
@@ -170,3 +177,4 @@ void* _tx_linux_thread_entry(void* ptr)
 
     return EXIT_SUCCESS;
 }
+

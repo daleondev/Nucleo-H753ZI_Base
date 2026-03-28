@@ -36,6 +36,7 @@ typedef struct TX_LINUX_PTHREAD_STACK_INFO_STRUCT
     VOID* host_stack_base;
     size_t host_stack_size;
     stack_t signal_stack;
+    UCHAR* baseline_host_stack_ptr;
 } TX_LINUX_PTHREAD_STACK_INFO;
 
 static __thread TX_THREAD* _tx_linux_stack_tracking_thread_ptr = TX_NULL;
@@ -78,6 +79,9 @@ static VOID _tx_linux_thread_stack_update(TX_THREAD* thread_ptr, VOID* stack_ptr
     UCHAR* stack_start;
     UCHAR* stack_end;
     UCHAR* current_stack_ptr;
+    UCHAR* logical_stack_ptr;
+    size_t logical_stack_size;
+    size_t host_stack_delta;
 
     if ((thread_ptr == TX_NULL) || (thread_ptr->tx_thread_id != TX_THREAD_ID) || (stack_ptr == TX_NULL)) {
         return;
@@ -95,30 +99,36 @@ static VOID _tx_linux_thread_stack_update(TX_THREAD* thread_ptr, VOID* stack_ptr
     stack_start = (UCHAR*)thread_ptr->tx_thread_stack_start;
     stack_end = (UCHAR*)thread_ptr->tx_thread_stack_end;
     current_stack_ptr = (UCHAR*)stack_ptr;
+    logical_stack_size = (size_t)thread_ptr->tx_thread_stack_size;
 
     if ((current_stack_ptr < ((UCHAR*)stack_info->host_stack_base)) ||
         (current_stack_ptr >= (((UCHAR*)stack_info->host_stack_base) + stack_info->host_stack_size))) {
         return;
     }
 
-    if (current_stack_ptr < stack_start) {
-        thread_ptr->tx_thread_stack_ptr = stack_start;
-#ifdef TX_ENABLE_STACK_CHECKING
-        thread_ptr->tx_thread_stack_highest_ptr = stack_start;
-#endif
-        return;
+    if (stack_info->baseline_host_stack_ptr == TX_NULL) {
+        stack_info->baseline_host_stack_ptr = current_stack_ptr;
     }
 
-    if (current_stack_ptr > stack_end) {
-        current_stack_ptr = stack_end;
+    if (current_stack_ptr >= stack_info->baseline_host_stack_ptr) {
+        logical_stack_ptr = stack_end;
+    }
+    else {
+        host_stack_delta = (size_t)(stack_info->baseline_host_stack_ptr - current_stack_ptr);
+        if (host_stack_delta >= logical_stack_size) {
+            logical_stack_ptr = stack_start;
+        }
+        else {
+            logical_stack_ptr = stack_end - host_stack_delta;
+        }
     }
 
-    thread_ptr->tx_thread_stack_ptr = current_stack_ptr;
+    thread_ptr->tx_thread_stack_ptr = logical_stack_ptr;
 
 #ifdef TX_ENABLE_STACK_CHECKING
     if ((thread_ptr->tx_thread_stack_highest_ptr == TX_NULL) ||
-        (current_stack_ptr < ((UCHAR*)thread_ptr->tx_thread_stack_highest_ptr))) {
-        thread_ptr->tx_thread_stack_highest_ptr = current_stack_ptr;
+        (logical_stack_ptr < ((UCHAR*)thread_ptr->tx_thread_stack_highest_ptr))) {
+        thread_ptr->tx_thread_stack_highest_ptr = logical_stack_ptr;
     }
 #endif
 }
@@ -223,10 +233,6 @@ UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr)
     stack_info->signal_stack.ss_flags = 0;
     thread_ptr->tx_thread_extension_ptr = stack_info;
 
-    thread_ptr->tx_thread_stack_start = host_stack_base;
-    thread_ptr->tx_thread_stack_size = host_stack_size - sizeof(ULONG);
-    thread_ptr->tx_thread_stack_end = ((UCHAR*)host_stack_base) + thread_ptr->tx_thread_stack_size - 1U;
-
     return (TX_SUCCESS);
 }
 
@@ -244,7 +250,18 @@ VOID _tx_linux_thread_stack_enable_signal_altstack(TX_THREAD* thread_ptr)
 
 VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr)
 {
-    _tx_linux_thread_stack_capture_current(thread_ptr);
+    TX_LINUX_PTHREAD_STACK_INFO* stack_info;
+
+    stack_info = _tx_linux_thread_stack_info(thread_ptr);
+    if (stack_info == TX_NULL) {
+        return;
+    }
+
+    stack_info->baseline_host_stack_ptr = (UCHAR*)_tx_linux_thread_stack_current_pointer();
+    thread_ptr->tx_thread_stack_ptr = thread_ptr->tx_thread_stack_end;
+#ifdef TX_ENABLE_STACK_CHECKING
+    thread_ptr->tx_thread_stack_highest_ptr = thread_ptr->tx_thread_stack_end;
+#endif
 }
 
 VOID* _tx_linux_thread_stack_host_base(TX_THREAD* thread_ptr)
@@ -280,10 +297,6 @@ VOID _tx_linux_thread_stack_refresh(TX_THREAD* thread_ptr)
     if (pthread_equal(thread_ptr->tx_thread_linux_thread_id, pthread_self())) {
         _tx_linux_thread_stack_capture_current(thread_ptr);
     }
-
-#ifdef TX_ENABLE_STACK_CHECKING
-    _tx_thread_stack_analyze(thread_ptr);
-#endif
 }
 
 VOID _tx_linux_thread_stack_refresh_all(VOID)
