@@ -90,9 +90,9 @@ namespace Tx::Linux
         struct StackInfo
         {
             std::unique_ptr<std::byte[], CustomDeleter<free>> host_stack_base;
-            size_t host_stack_size;
-            stack_t signal_stack;
-            std::byte* baseline_host_stack_ptr;
+            size_t host_stack_size{ 0 };
+            stack_t signal_stack{};
+            std::byte* baseline_host_stack_ptr{ nullptr };
 
             StackInfo(std::unique_ptr<std::byte[], CustomDeleter<free>>&& host_stack_base)
               : host_stack_base(std::move(host_stack_base))
@@ -175,7 +175,7 @@ namespace Tx::Linux
                 return make_error_code(Status::NO_MEMORY);
             }
 
-            return {};
+            return std::nullopt;
         }
 
         std::optional<std::error_code> update(TX_THREAD* thread_ptr, void* stack_ptr = nullptr)
@@ -228,7 +228,7 @@ namespace Tx::Linux
                 thread_ptr->tx_thread_stack_highest_ptr = logical_stack_ptr;
             }
 #endif
-            return {};
+            return std::nullopt;
         }
     }
 
