@@ -16,11 +16,10 @@ namespace Tx::Linux
 {
     namespace
     {
-        using StatusType = decltype(TX_SUCCESS);
-        enum class Status : StatusType
+        using ErrorType = decltype(TX_SUCCESS);
+        enum class Error : ErrorType
         {
-            SUCCESS = TX_SUCCESS,
-            DELETED,
+            DELETED = TX_DELETED,
             POOL_ERROR,
             PTR_ERROR,
             WAIT_ERROR,
@@ -57,18 +56,16 @@ namespace Tx::Linux
             INVALID_CEILING,
             FEATURE_NOT_ENABLED = TX_FEATURE_NOT_ENABLED
         };
-        constexpr auto getStatus(StatusType status) -> Status { return static_cast<Status>(status); }
 
         class StatusCategory : public std::error_category
         {
           public:
             const char* name() const noexcept override { return "TxStatus"; }
-            std::string message(int ev) const override { return std::to_string(static_cast<StatusType>(ev)); }
+            std::string message(int ev) const override { return std::to_string(static_cast<ErrorType>(ev)); }
         };
 
-        std::error_code make_error_code(Status e)
+        std::error_code make_error_code(Error e)
         {
-            assert(e != Status::SUCCESS);
             return std::error_code(static_cast<int>(e), []() -> std::error_category& {
                 static StatusCategory instance;
                 return instance;
@@ -130,7 +127,7 @@ namespace Tx::Linux
 
             auto requested_size{ thread_ptr->tx_thread_stack_size };
             if (requested_size == 0U) {
-                return make_error_code(Status::SIZE_ERROR);
+                return make_error_code(Error::SIZE_ERROR);
             }
 
             if (auto stack_info{ StackInfo::of(thread_ptr) }; stack_info) {
@@ -152,7 +149,7 @@ namespace Tx::Linux
 
             void* host_stack_base_ptr{ nullptr };
             if (posix_memalign(&host_stack_base_ptr, page_size, host_stack_size) != 0) {
-                return make_error_code(Status::NO_MEMORY);
+                return make_error_code(Error::NO_MEMORY);
             }
 
             auto host_stack_base{ std::unique_ptr<std::byte[], CustomDeleter<free>>{
@@ -172,7 +169,7 @@ namespace Tx::Linux
 
                 thread_ptr->tx_thread_extension_ptr = stack_info.release();
             } catch (const std::bad_alloc&) {
-                return make_error_code(Status::NO_MEMORY);
+                return make_error_code(Error::NO_MEMORY);
             }
 
             return std::nullopt;
@@ -182,12 +179,12 @@ namespace Tx::Linux
         {
             if (!thread_ptr || (thread_ptr->tx_thread_id != TX_THREAD_ID) || !stack_ptr ||
                 !thread_ptr->tx_thread_stack_start || !thread_ptr->tx_thread_stack_end) {
-                return make_error_code(Status::PTR_ERROR);
+                return make_error_code(Error::PTR_ERROR);
             }
 
             auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) };
             if (!stack_info) {
-                return make_error_code(Status::PTR_ERROR);
+                return make_error_code(Error::PTR_ERROR);
             }
 
             auto stack_start{ reinterpret_cast<std::byte*>(thread_ptr->tx_thread_stack_start) };
@@ -198,7 +195,7 @@ namespace Tx::Linux
 
             if ((current_stack_ptr < host_stack_base) ||
                 (current_stack_ptr >= (host_stack_base + stack_info->host_stack_size))) {
-                return make_error_code(Status::PTR_ERROR);
+                return make_error_code(Error::PTR_ERROR);
             }
 
             if (!stack_info->baseline_host_stack_ptr) {
