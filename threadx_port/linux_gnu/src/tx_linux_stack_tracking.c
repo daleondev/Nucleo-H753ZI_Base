@@ -1,14 +1,3 @@
-/***************************************************************************
- * Copyright (c) 2024 Microsoft Corporation
- * Copyright (c) 2026-present Eclipse ThreadX contributors
- *
- * This program and the accompanying materials are made available under the
- * terms of the MIT License which is available at
- * https://opensource.org/licenses/MIT.
- *
- * SPDX-License-Identifier: MIT
- **************************************************************************/
-
 #define TX_SOURCE_CODE
 
 #include "tx_api.h"
@@ -17,7 +6,6 @@
 #include "tx_linux_stack_tracking.h"
 
 #include <pthread.h>
-#include <semaphore.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -29,8 +17,6 @@
 #error "The custom Linux ThreadX stack tracking implementation currently supports x86_64 only."
 #endif
 
-#define TX_LINUX_STACK_SNAPSHOT_SIGNAL SIGRTMIN
-
 typedef struct TX_LINUX_PTHREAD_STACK_INFO_STRUCT
 {
     VOID* host_stack_base;
@@ -40,13 +26,6 @@ typedef struct TX_LINUX_PTHREAD_STACK_INFO_STRUCT
 } TX_LINUX_PTHREAD_STACK_INFO;
 
 static __thread TX_THREAD* _tx_linux_stack_tracking_thread_ptr = TX_NULL;
-static sem_t _tx_linux_thread_stack_snapshot_semaphore;
-static pthread_mutex_t _tx_linux_thread_stack_snapshot_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void _tx_linux_thread_suspend(pthread_t thread_id);
-void _tx_linux_thread_resume(pthread_t thread_id);
-
-VOID _tx_thread_stack_analyze(TX_THREAD* thread_ptr);
 
 static ULONG _tx_linux_thread_stack_round_up(ULONG value, ULONG alignment)
 {
@@ -165,17 +144,6 @@ VOID _tx_linux_thread_stack_capture_signal_context(VOID* context)
     ucontext = (ucontext_t*)context;
     stack_ptr = (VOID*)(uintptr_t)ucontext->uc_mcontext.gregs[REG_RSP];
     _tx_linux_thread_stack_update(_tx_linux_stack_tracking_thread_ptr, stack_ptr);
-}
-
-VOID _tx_linux_thread_stack_capture_snapshot_signal(VOID* context)
-{
-    _tx_linux_thread_stack_capture_signal_context(context);
-    sem_post(&_tx_linux_thread_stack_snapshot_semaphore);
-}
-
-VOID _tx_linux_thread_stack_system_initialize(VOID)
-{
-    sem_init(&_tx_linux_thread_stack_snapshot_semaphore, 0, 0);
 }
 
 UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr)

@@ -11,7 +11,7 @@ namespace
 {
     constexpr size_t MAIN_THREAD_STACK_SIZE{ 4096 };
     constexpr UINT MAIN_THREAD_PRIO{ 15 };
-    constexpr ULONG BLINK_PERIOD_MS{ 5000 };
+    constexpr ULONG BLINK_PERIOD_MS{ 100 };
 
     alignas(8) std::array<std::byte, MAIN_THREAD_STACK_SIZE> main_thread_stack{};
     CHAR main_thread_name[] = "Main Thread";
