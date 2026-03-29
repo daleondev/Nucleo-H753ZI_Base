@@ -30,8 +30,24 @@ namespace thread_diagnostics
             size_t peak_stack_usage;
         };
 
+        void refreshThreadStackInfo(TX_THREAD* thread)
+        {
+#if defined(TX_ENABLE_STACK_CHECKING) && !defined(HAL_COMPAT_LINUX)
+            if (thread != TX_NULL && thread != _tx_thread_current_ptr &&
+                thread->tx_thread_stack_ptr != TX_NULL && thread->tx_thread_stack_highest_ptr != TX_NULL &&
+                reinterpret_cast<uintptr_t>(thread->tx_thread_stack_ptr) <
+                  reinterpret_cast<uintptr_t>(thread->tx_thread_stack_highest_ptr)) {
+                thread->tx_thread_stack_highest_ptr = thread->tx_thread_stack_ptr;
+            }
+#else
+            static_cast<void>(thread);
+#endif
+        }
+
         ThreadInfo getThreadInformation(TX_THREAD* thread)
         {
+            refreshThreadStackInfo(thread);
+
             const auto stack_end = reinterpret_cast<uintptr_t>(thread->tx_thread_stack_end);
             const auto current_stack_ptr = reinterpret_cast<uintptr_t>(thread->tx_thread_stack_ptr);
             const auto peak_stack_ptr = reinterpret_cast<uintptr_t>(thread->tx_thread_stack_highest_ptr);
