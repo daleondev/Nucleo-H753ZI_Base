@@ -4,7 +4,7 @@
  #include "tx_thread.h"
  #include <stdio.h>
  #include <unistd.h>
-+#include "tx_linux_stack_tracking.h"
++#include "tx_thread_stack_info.hpp"
  
  
  /* Prototype for new thread entry function.  */

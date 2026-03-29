@@ -1,21 +1,21 @@
 
 find_program(THREADX_PATCH_EXECUTABLE NAMES patch REQUIRED)
 
-set(THREADX_LINUX_GNU_UPSTREAM_DIR "${CMAKE_SOURCE_DIR}/external/threadx/ports/linux/gnu")
-set(THREADX_LINUX_GNU_PATCH_DIR "${CMAKE_CURRENT_LIST_DIR}/patches")
-set(THREADX_LINUX_GNU_GENERATED_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_src")
+set(THREADX_LINUX_GNU_DIR "${CMAKE_SOURCE_DIR}/external/threadx/ports/linux/gnu")
+set(THREADX_LINUX_GNU_PORT_PATCH_DIR "${CMAKE_CURRENT_LIST_DIR}/patches")
+set(THREADX_LINUX_GNU_PORT_SRC_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_src")
 
 function(threadx_linux_generate_patched_source output_var source_name)
-    set(upstream_source "${THREADX_LINUX_GNU_UPSTREAM_DIR}/src/${source_name}")
-    set(patch_file "${THREADX_LINUX_GNU_PATCH_DIR}/${source_name}.patch")
-    set(output_file "${THREADX_LINUX_GNU_GENERATED_SRC_DIR}/${source_name}")
+    set(upstream_source "${THREADX_LINUX_GNU_DIR}/src/${source_name}")
+    set(patch_file "${THREADX_LINUX_GNU_PORT_PATCH_DIR}/${source_name}.patch")
+    set(output_file "${THREADX_LINUX_GNU_PORT_SRC_DIR}/${source_name}")
 
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         "${upstream_source}"
         "${patch_file}"
     )
 
-    file(MAKE_DIRECTORY "${THREADX_LINUX_GNU_GENERATED_SRC_DIR}")
+    file(MAKE_DIRECTORY "${THREADX_LINUX_GNU_PORT_SRC_DIR}")
     file(REMOVE "${output_file}")
 
     execute_process(
@@ -51,15 +51,15 @@ threadx_linux_generate_patched_source(TX_LINUX_THREAD_SYSTEM_RETURN_SOURCE "tx_t
 target_sources(${PROJECT_NAME}
     PRIVATE
     # {{BEGIN_TARGET_SOURCES}}
-    ${THREADX_LINUX_GNU_UPSTREAM_DIR}/src/tx_thread_context_restore.c
-    ${THREADX_LINUX_GNU_UPSTREAM_DIR}/src/tx_thread_context_save.c
-    ${THREADX_LINUX_GNU_UPSTREAM_DIR}/src/tx_thread_interrupt_control.c
-    ${THREADX_LINUX_GNU_UPSTREAM_DIR}/src/tx_thread_schedule.c
-    ${THREADX_LINUX_GNU_UPSTREAM_DIR}/src/tx_timer_interrupt.c
+    ${THREADX_LINUX_GNU_DIR}/src/tx_thread_context_restore.c
+    ${THREADX_LINUX_GNU_DIR}/src/tx_thread_context_save.c
+    ${THREADX_LINUX_GNU_DIR}/src/tx_thread_interrupt_control.c
+    ${THREADX_LINUX_GNU_DIR}/src/tx_thread_schedule.c
+    ${THREADX_LINUX_GNU_DIR}/src/tx_timer_interrupt.c
     ${TX_LINUX_INITIALIZE_LOW_LEVEL_SOURCE}
     ${TX_LINUX_THREAD_STACK_BUILD_SOURCE}
     ${TX_LINUX_THREAD_SYSTEM_RETURN_SOURCE}
-    ${CMAKE_CURRENT_LIST_DIR}/src/tx_linux_stack_tracking.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/tx_thread_stack_info.cpp
 
     # {{END_TARGET_SOURCES}}
 )
@@ -67,7 +67,7 @@ target_sources(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME}
     PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/src
-    ${THREADX_LINUX_GNU_UPSTREAM_DIR}/inc
+    ${THREADX_LINUX_GNU_DIR}/inc
 )
 
 target_compile_definitions(${PROJECT_NAME}

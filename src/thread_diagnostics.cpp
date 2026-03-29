@@ -14,11 +14,7 @@
 #include <vector>
 
 #if defined(HAL_COMPAT_LINUX)
-#include <pthread.h>
-
-extern "C" {
-#include "tx_linux_stack_tracking.h"
-}
+#include "tx_thread_stack_info.hpp"
 #endif
 
 namespace thread_diagnostics
@@ -146,7 +142,7 @@ namespace thread_diagnostics
     void printAll()
     {
 #if defined(HAL_COMPAT_LINUX)
-        _tx_linux_thread_stack_refresh_all();
+        Tx::Linux::refreshAllThreadsStackInfo();
 #endif
 
         auto threads_info{ getAllThreadsInformation() };

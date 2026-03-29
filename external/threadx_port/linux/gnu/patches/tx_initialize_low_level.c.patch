@@ -4,7 +4,7 @@
  #include <unistd.h>
  #include <errno.h>
  #include <sys/sysinfo.h>
-+#include "tx_linux_stack_tracking.h"
++#include "tx_thread_stack_info.hpp"
  
  
  /* Define various Linux objects used by the ThreadX port.  */

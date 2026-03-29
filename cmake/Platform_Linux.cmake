@@ -1,6 +1,6 @@
 set(THREADX_ARCH linux)
 set(THREADX_TOOLCHAIN gnu)
-set(THREADX_CUSTOM_PORT ${CMAKE_SOURCE_DIR}/threadx_port/linux_gnu)
+set(THREADX_CUSTOM_PORT ${CMAKE_SOURCE_DIR}/external/threadx_port/linux/gnu)
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/threadx)
 
 target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING TX_LINUX_MULTI_CORE)
