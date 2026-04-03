@@ -5,6 +5,7 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
+    "initializeCommand": "git submodule sync --recursive && git submodule update --init --recursive",
     "features": {
         "ghcr.io/devcontainers/features/docker-in-docker:2": {
             "enableNonRootDocker": "true"
