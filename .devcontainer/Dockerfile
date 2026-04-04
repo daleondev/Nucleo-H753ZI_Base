@@ -1,23 +1,26 @@
-# Use the official devcontainer base image so the expected vscode user exists.
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
-# Prevent interactive prompts (like timezone selections) from blocking the build
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update the package index, install the required packages, and clean up
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+RUN apt update && apt install -y --no-install-recommends \
+    software-properties-common \
+    wget \
+    xz-utils \
+    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+    && apt update && apt install -y --no-install-recommends \
     cmake \
-    g++ \
-    gcc-arm-none-eabi \
-    git \
-    libstdc++-arm-none-eabi-newlib \
+    ninja-build \
+    gcc-15 \
+    g++-15 \
     openocd \
-    && apt-get clean \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 100 \
+    && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# (Optional) Set the default working directory
+RUN wget -qO- https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi.tar.xz | tar -xJ -C /opt
+ENV PATH="/opt/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:${PATH}"
+
 WORKDIR /workspace
 
-# Set the default command to run when the container starts
 CMD ["/bin/bash"]
