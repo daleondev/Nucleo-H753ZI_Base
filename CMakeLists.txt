@@ -13,11 +13,16 @@ target_include_directories(${PROJECT_NAME}
 target_sources(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/thread_diagnostics.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/thread_diagnostics.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/OpcUaServer.cpp
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("cmake/Platform_Linux.cmake")
+    target_sources(${PROJECT_NAME}
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/NetifBringup_linux.cpp
+    )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     set(TX_USER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
     include("cmake/Platform_STM32.cmake")
@@ -25,12 +30,14 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     target_sources(${PROJECT_NAME}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/NetifBringup_stm32.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/main.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/gpio.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/rng.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/rtc.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/tim.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/fdcan.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/eth.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_it.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_hal_msp.c
             ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_hal_timebase_tim.c
@@ -49,10 +56,16 @@ else()
     message(FATAL_ERROR "Unsupported target system: ${CMAKE_SYSTEM_NAME}")
 endif()
 
+# Networking + OPC UA stack (lwIP on ThreadX, open62541 with the lwIP eventloop).
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/external/lwip_port)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/external/open62541_port)
+
 target_link_libraries(${PROJECT_NAME} 
     PRIVATE
         Platform
         HalCompat
+        LwipPort
+        Open62541Lwip
 )
 
 target_compile_features(${PROJECT_NAME}

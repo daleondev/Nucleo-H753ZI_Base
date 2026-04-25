@@ -1,4 +1,6 @@
 #include "hal_compat/platform_hal.hpp"
+#include "opcua/NetifBringup.hpp"
+#include "opcua/OpcUaServer.hpp"
 #include "thread_diagnostics.hpp"
 
 #include <tx_api.h>
@@ -16,6 +18,8 @@ namespace
     alignas(8) std::array<std::byte, MAIN_THREAD_STACK_SIZE> main_thread_stack{};
     CHAR main_thread_name[] = "Main Thread";
     TX_THREAD main_thread;
+
+    opcua::OpcUaServer opcUaServer;
 
     constexpr ULONG millisecondsToTicks(ULONG milliseconds)
     {
@@ -41,6 +45,14 @@ namespace
     void txMain(ULONG)
     {
         const auto blink_period_ticks{ millisecondsToTicks(BLINK_PERIOD_MS) };
+
+        if (opcua::bringUpNetif()) {
+            opcUaServer.start(opcua::OPCUA_DEFAULT_PORT);
+        }
+        else {
+            std::printf("opcua: skipping server, network bring-up failed\n");
+            std::fflush(stdout);
+        }
 
         while (true) {
             thread_diagnostics::printAll();

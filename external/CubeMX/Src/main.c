@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "app_threadx.h"
 #include "main.h"
+#include "eth.h"
 #include "fdcan.h"
 #include "rng.h"
 #include "rtc.h"
@@ -263,7 +264,6 @@ void Error_Handler(void)
   __disable_irq();
   while (1)
   {
-    BSP_LED_Toggle(LED_RED);
   }
   /* USER CODE END Error_Handler_Debug */
 }

@@ -15,8 +15,10 @@
         "--privileged"
     ],
     "mounts": [
-        "source=/dev/bus/usb,target=/dev/bus/usb,type=bind"
+        "source=/dev/bus/usb,target=/dev/bus/usb,type=bind",
+        "source=/dev/net/tun,target=/dev/net/tun,type=bind"
     ],
+    "postStartCommand": "sudo bash scripts/setup_tap.sh || true",
     "customizations": {
         "vscode": {
             "settings": {

@@ -13,3 +13,9 @@
 [submodule "external/threadx"]
 	path = external/threadx
 	url = https://github.com/eclipse-threadx/threadx.git
+[submodule "external/lwip"]
+	path = external/lwip
+	url = https://github.com/lwip-tcpip/lwip.git
+[submodule "external/open62541"]
+	path = external/open62541
+	url = https://github.com/open62541/open62541.git

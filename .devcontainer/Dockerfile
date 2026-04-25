@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update && apt install -y --no-install-recommends \
     software-properties-common \
+    socat \
     wget \
     xz-utils \
     && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
