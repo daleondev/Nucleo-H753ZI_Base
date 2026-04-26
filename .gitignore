@@ -1,4 +1,5 @@
 build/
+references/
 
 # CubeMX user specific files
 .mxproject

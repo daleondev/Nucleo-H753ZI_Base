@@ -31,8 +31,11 @@
 #define MEM_ALIGNMENT 4
 #define MEM_SIZE (32 * 1024)
 
-#define MEMP_NUM_PBUF 16
-#define MEMP_NUM_TCP_PCB 8
+#define MEMP_NUM_PBUF 24
+/* Each UA_EventLoop instance allocates 2 self-pipe TCP PCBs in addition to
+ * its listen / connect sockets. With one server + two clients (production +
+ * bench) we need ~12 active PCBs, so bump from the default to leave headroom. */
+#define MEMP_NUM_TCP_PCB 16
 #define MEMP_NUM_TCP_PCB_LISTEN 4
 #define MEMP_NUM_TCP_SEG 32
 #define MEMP_NUM_NETBUF 8

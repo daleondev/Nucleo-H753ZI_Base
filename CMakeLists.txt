@@ -16,6 +16,10 @@ target_sources(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/src/thread_diagnostics.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/Server.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/Client.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/BenchFixture.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/Bench.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/bench/Stats.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/bench/CpuLoad.cpp
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

@@ -37,6 +37,13 @@ namespace opcua
             return false;
         }
 
+#if defined(HAL_COMPAT_STM32)
+        // Match the server-side 8 kB chunk buffer; default 64 kB exhausts heap.
+        UA_ClientConfig* clientConfig = UA_Client_getConfig(m_client);
+        clientConfig->localConnectionConfig.sendBufferSize = 8192;
+        clientConfig->localConnectionConfig.recvBufferSize = 8192;
+#endif
+
         m_endpointUrl = endpointUrl;
         m_running.store(true, std::memory_order_release);
         m_connected.store(false, std::memory_order_release);

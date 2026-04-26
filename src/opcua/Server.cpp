@@ -41,6 +41,14 @@ namespace opcua
             return false;
         }
 
+#if defined(HAL_COMPAT_STM32)
+        // Default 64 kB chunk buffer is far larger than anything we exchange
+        // (small scalar reads / writes) and quickly exhausts the heap once a
+        // second client connects. 8 kB is plenty and matches the bench client
+        // and production client config below.
+        config->tcpBufSize = 8192;
+#endif
+
         // Replace the default "opc.tcp://:<port>" with one carrying our host.
         char urlBuf[128];
         std::snprintf(urlBuf, sizeof(urlBuf), "opc.tcp://%s:%u", host, portNumber);

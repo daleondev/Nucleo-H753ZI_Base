@@ -1,4 +1,6 @@
 #include "hal_compat/platform_hal.hpp"
+#include "opcua/Bench.hpp"
+#include "opcua/BenchFixture.hpp"
 #include "opcua/Client.hpp"
 #include "opcua/NetifBringup.hpp"
 #include "opcua/Server.hpp"
@@ -21,6 +23,7 @@ namespace
 
     opcua::Server server;
     opcua::Client client;
+    opcua::BenchHarness bench;
     char client_endpoint_url[64]{};
 
     constexpr ULONG millisecondsToTicks(ULONG milliseconds)
@@ -51,12 +54,15 @@ namespace
         if (opcua::bringUpNetif()) {
             const char* host = opcua::getServerHost();
             if (server.start(opcua::OPCUA_DEFAULT_PORT, host)) {
+                opcua::populateBenchFixture(server.handle());
                 std::snprintf(client_endpoint_url,
                               sizeof(client_endpoint_url),
                               "opc.tcp://%s:%u",
                               host,
                               static_cast<unsigned>(opcua::OPCUA_DEFAULT_PORT));
-                client.start(client_endpoint_url);
+                if (client.start(client_endpoint_url)) {
+                    bench.start(client_endpoint_url);
+                }
             }
         }
         else {

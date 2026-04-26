@@ -194,8 +194,8 @@ namespace thread_diagnostics
 
         // thread infos
         for (const auto& thread : threads_info) {
-            auto current_usage_percent{ (thread.current_stack_usage * 100) / thread.stack_size };
-            auto bar_length = std::min<size_t>((current_usage_percent * BAR_WIDTH) / 100, BAR_WIDTH);
+            auto usage_percent{ (thread.peak_stack_usage * 100) / thread.stack_size };
+            auto bar_length = std::min<size_t>((usage_percent * BAR_WIDTH) / 100, BAR_WIDTH);
 
             auto info{ formatRow(thread.prio,
                                  thread.name,
@@ -203,7 +203,7 @@ namespace thread_diagnostics
                                  thread.stack_size,
                                  thread.current_stack_usage,
                                  thread.peak_stack_usage,
-                                 current_usage_percent,
+                                 usage_percent,
                                  repeatStr("█"sv, bar_length) + repeatStr("░"sv, BAR_WIDTH - bar_length)) };
 
             std::printf("%s\r\n", mid_border.c_str());

@@ -73,8 +73,8 @@ int32_t BSP_LED_Toggle(Led_TypeDef led)
     auto& state = led_states[static_cast<size_t>(led)];
     state.is_on = !state.is_on;
 
-    std::printf("[sim][hal] BSP_LED_Toggle(%s) -> %s\n", state.name, state.is_on ? "on" : "off");
-    std::fflush(stdout);
+    // std::printf("[sim][hal] BSP_LED_Toggle(%s) -> %s\n", state.name, state.is_on ? "on" : "off");
+    // std::fflush(stdout);
     return BSP_ERROR_NONE;
 }
 
