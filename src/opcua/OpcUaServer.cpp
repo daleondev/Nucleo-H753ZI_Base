@@ -3,8 +3,10 @@
 #include <open62541/server.h>
 #include <open62541/server_config_default.h>
 #include <open62541/types.h>
+#include <open62541/util.h>
 
 #include <cstdio>
+#include <cstring>
 
 namespace opcua
 {
@@ -47,10 +49,13 @@ namespace opcua
 
     OpcUaServer::~OpcUaServer() { stop(); }
 
-    bool OpcUaServer::start(std::uint16_t portNumber)
+    bool OpcUaServer::start(std::uint16_t portNumber, const char* host)
     {
         if (m_server != nullptr) {
             return false;
+        }
+        if (host == nullptr || host[0] == '\0') {
+            host = "localhost";
         }
         m_server = UA_Server_new();
         if (m_server == nullptr) {
@@ -62,6 +67,30 @@ namespace opcua
             m_server = nullptr;
             return false;
         }
+
+        // Replace the default "opc.tcp://:<port>" with one carrying our host.
+        char urlBuf[128];
+        std::snprintf(urlBuf, sizeof(urlBuf), "opc.tcp://%s:%u", host, portNumber);
+        if (config->serverUrls != nullptr) {
+            UA_Array_delete(config->serverUrls, config->serverUrlsSize, &UA_TYPES[UA_TYPES_STRING]);
+            config->serverUrls = nullptr;
+            config->serverUrlsSize = 0;
+        }
+        UA_String newUrl = UA_STRING(urlBuf);
+        if (UA_Array_copy(
+              &newUrl, 1, reinterpret_cast<void**>(&config->serverUrls), &UA_TYPES[UA_TYPES_STRING]) !=
+            UA_STATUSCODE_GOOD) {
+            UA_Server_delete(m_server);
+            m_server = nullptr;
+            return false;
+        }
+        config->serverUrlsSize = 1;
+
+        // Mirror the host into the application URI for nicer discovery output.
+        char uriBuf[160];
+        std::snprintf(uriBuf, sizeof(uriBuf), "urn:%s:NUCLEO-H753ZI:Application", host);
+        UA_String_clear(&config->applicationDescription.applicationUri);
+        config->applicationDescription.applicationUri = UA_STRING_ALLOC(uriBuf);
 
         addUInt64Variable(m_server, "Demo.Counter", 0);
         addUInt64Variable(m_server, "Demo.Uptime", 0);
@@ -85,7 +114,7 @@ namespace opcua
             m_server = nullptr;
             return false;
         }
-        std::printf("opcua: server listening on port %u\n", portNumber);
+        std::printf("opcua: server listening on opc.tcp://%s:%u\n", host, portNumber);
         std::fflush(stdout);
         return true;
     }

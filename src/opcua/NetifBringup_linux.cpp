@@ -11,6 +11,7 @@ namespace opcua
     namespace
     {
         netif g_lwipNetif{};
+        constexpr const char* SERVER_IP_STR{ "10.10.10.2" };
     }
 
     bool bringUpNetif()
@@ -26,4 +27,6 @@ namespace opcua
         }
         return true;
     }
+
+    const char* getServerHost() { return SERVER_IP_STR; }
 } // namespace opcua

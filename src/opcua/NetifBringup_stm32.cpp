@@ -13,6 +13,8 @@ namespace opcua
     namespace
     {
         netif g_lwipNetif{};
+        constexpr const char* STM32_HOSTNAME{ "stm32-nucleo" };
+        constexpr const char* STM32_IP_STR{ "10.10.10.2" };
     }
 
     bool bringUpNetif()
@@ -27,6 +29,15 @@ namespace opcua
             std::printf("netif: eth bring-up failed\n");
             return false;
         }
+#if LWIP_NETIF_HOSTNAME
+        netif_set_hostname(&g_lwipNetif, STM32_HOSTNAME);
+#endif
+        std::printf("netif: ip=%s hostname=%s\n", STM32_IP_STR, STM32_HOSTNAME);
         return true;
     }
+
+    // OPC UA serverUrl must resolve at bind time. lwIP has no DNS resolver in
+    // this build, so we advertise the dotted IP. The hostname is still set on
+    // the netif (DHCP/mDNS) above.
+    const char* getServerHost() { return STM32_IP_STR; }
 } // namespace opcua

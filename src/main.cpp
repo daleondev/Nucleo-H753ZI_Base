@@ -1,7 +1,6 @@
 #include "hal_compat/platform_hal.hpp"
 #include "opcua/NetifBringup.hpp"
 #include "opcua/OpcUaServer.hpp"
-#include "thread_diagnostics.hpp"
 
 #include <tx_api.h>
 #include <tx_thread.h>
@@ -11,7 +10,7 @@
 
 namespace
 {
-    constexpr size_t MAIN_THREAD_STACK_SIZE{ 4096 };
+    constexpr size_t MAIN_THREAD_STACK_SIZE{ 8192 };
     constexpr UINT MAIN_THREAD_PRIO{ 15 };
     constexpr ULONG BLINK_PERIOD_MS{ 100 };
 
@@ -47,7 +46,7 @@ namespace
         const auto blink_period_ticks{ millisecondsToTicks(BLINK_PERIOD_MS) };
 
         if (opcua::bringUpNetif()) {
-            opcUaServer.start(opcua::OPCUA_DEFAULT_PORT);
+            opcUaServer.start(opcua::OPCUA_DEFAULT_PORT, opcua::getServerHost());
         }
         else {
             std::printf("opcua: skipping server, network bring-up failed\n");
@@ -55,8 +54,6 @@ namespace
         }
 
         while (true) {
-            thread_diagnostics::printAll();
-
             BSP_LED_Toggle(LED_GREEN);
             BSP_LED_Toggle(LED_RED);
 

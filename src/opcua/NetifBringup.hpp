@@ -11,6 +11,13 @@ namespace opcua
      */
     bool bringUpNetif();
 
+    /*
+     * Returns the host string (dotted-IP or DNS hostname) the OPC UA server
+     * should advertise in discovery URLs and the listen socket label. Valid
+     * only after a successful bringUpNetif() call. Never null.
+     */
+    const char* getServerHost();
+
     constexpr std::uint16_t OPCUA_DEFAULT_PORT{ 4840 };
 } // namespace opcua
 

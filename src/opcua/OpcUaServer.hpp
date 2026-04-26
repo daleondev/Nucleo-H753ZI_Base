@@ -20,7 +20,9 @@ namespace opcua
         OpcUaServer& operator=(const OpcUaServer&) = delete;
         ~OpcUaServer();
 
-        bool start(std::uint16_t portNumber);
+        // host: dotted-IP or DNS name embedded into discovery/server URLs
+        //   (e.g. "10.10.10.2" or "stm32-nucleo"). Must outlive the call.
+        bool start(std::uint16_t portNumber, const char* host);
         void stop();
 
       private:
