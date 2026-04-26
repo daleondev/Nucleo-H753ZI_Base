@@ -1,6 +1,7 @@
 #include "hal_compat/platform_hal.hpp"
+#include "opcua/Client.hpp"
 #include "opcua/NetifBringup.hpp"
-#include "opcua/OpcUaServer.hpp"
+#include "opcua/Server.hpp"
 
 #include <tx_api.h>
 #include <tx_thread.h>
@@ -18,7 +19,9 @@ namespace
     CHAR main_thread_name[] = "Main Thread";
     TX_THREAD main_thread;
 
-    opcua::OpcUaServer opcUaServer;
+    opcua::Server server;
+    opcua::Client client;
+    char client_endpoint_url[64]{};
 
     constexpr ULONG millisecondsToTicks(ULONG milliseconds)
     {
@@ -46,10 +49,18 @@ namespace
         const auto blink_period_ticks{ millisecondsToTicks(BLINK_PERIOD_MS) };
 
         if (opcua::bringUpNetif()) {
-            opcUaServer.start(opcua::OPCUA_DEFAULT_PORT, opcua::getServerHost());
+            const char* host = opcua::getServerHost();
+            if (server.start(opcua::OPCUA_DEFAULT_PORT, host)) {
+                std::snprintf(client_endpoint_url,
+                              sizeof(client_endpoint_url),
+                              "opc.tcp://%s:%u",
+                              host,
+                              static_cast<unsigned>(opcua::OPCUA_DEFAULT_PORT));
+                client.start(client_endpoint_url);
+            }
         }
         else {
-            std::printf("opcua: skipping server, network bring-up failed\n");
+            std::printf("opcua: skipping server/client, network bring-up failed\n");
             std::fflush(stdout);
         }
 

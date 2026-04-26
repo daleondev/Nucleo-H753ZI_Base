@@ -14,7 +14,8 @@ target_sources(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/thread_diagnostics.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/OpcUaServer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/Server.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/opcua/Client.cpp
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
