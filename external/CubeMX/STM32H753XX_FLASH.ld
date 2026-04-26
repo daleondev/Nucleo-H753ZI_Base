@@ -69,6 +69,12 @@ _sstack = _estack - _Min_Stack_Size;
 /* Generate a link error if heap and stack don't fit into RAM */
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
 _Min_Stack_Size = 0x400; /* required amount of stack */
+/* Newlib heap size: the heap lives in main RAM (AXISRAM) instead of
+ * DTCMRAM because open62541's standard nodeset alone consumes ~80 kB,
+ * which leaves little room in the 128 kB DTCMRAM for runtime allocations
+ * (subscriptions, monitored items, message buffers). 144 kB leaves a
+ * comfortable ~20 kB margin in main RAM for future .bss growth. */
+_Heap_Size = 144K;
 
 /* Define output sections */
 SECTIONS
@@ -230,16 +236,27 @@ SECTIONS
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
 
-  /* User_heap_stack section, used to check that there is enough RAM left */
+  /* MSP stack reservation (interrupt-context stack only).
+   * Newlib heap is now in main RAM (see _heap_section below) so this is
+   * just a small parking area at the top of DTCMRAM for the MSP. */
   ._user_heap_stack (NOLOAD) :
   {
     . = ALIGN(8);
-    PROVIDE ( end = . );
-    PROVIDE ( _end = . );
-    . = . + _Min_Heap_Size;
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >DTCMRAM
+
+  /* Newlib heap lives in main RAM, after .bss. _sbrk() grows the heap
+   * from _heap_start up to _heap_end. */
+  ._heap_section (NOLOAD) : ALIGN(8)
+  {
+    PROVIDE ( end = . );
+    PROVIDE ( _end = . );
+    PROVIDE ( _heap_start = . );
+    . = . + _Heap_Size;
+    . = ALIGN(8);
+    PROVIDE ( _heap_end = . );
+  } >RAM
 
 
 

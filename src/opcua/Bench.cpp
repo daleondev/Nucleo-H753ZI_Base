@@ -12,6 +12,9 @@
 #include <open62541/types.h>
 
 #include <cstdio>
+#if defined(HAL_COMPAT_STM32)
+#include <malloc.h> // mallinfo for heap diagnostics on newlib
+#endif
 
 namespace opcua
 {
@@ -25,12 +28,13 @@ namespace opcua
         // a meaningful p99 and keeps the whole run under ~5 minutes.
         constexpr std::uint32_t BENCH_SAMPLE_COUNT{ 256 };
         // Monitored-items sweep: each sample is gated by the publishing
-        // interval (~50 ms) so 32 samples × 3 N values ≈ 5 s extra. N is
-        // capped at 8 because a heap-fragmented STM32 server fails to
-        // allocate the createDataChanges working buffer at higher counts
-        // even though the request/response itself is small.
+        // interval (~50 ms) so 32 samples × N values ≈ a few seconds extra.
+        // N is capped at 16 because creating 32+ MonitoredItems exhausts
+        // the server-side heap (createDataChanges then returns
+        // BadOutOfMemory). With ~17 kB free heap on the server during
+        // steady-state, each MI costs ~400 B in queue + bookkeeping.
         constexpr std::uint32_t MON_SAMPLE_COUNT{ 32 };
-        constexpr std::uint32_t MON_COUNTS[]{ 1, 4, 8 };
+        constexpr std::uint32_t MON_COUNTS[]{ 1, 4, 8, 16 };
 #else
         constexpr std::uint32_t BENCH_SAMPLE_COUNT{ 1024 };
         constexpr std::uint32_t MON_SAMPLE_COUNT{ 64 };
@@ -178,6 +182,27 @@ namespace opcua
             std::printf("└──────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴─────"
                         "─────┴──────────┴──────────┘\n");
             std::fflush(stdout);
+        }
+
+        // Print newlib heap usage: arena (sbrk-grown total), in-use, free,
+        // largest-free-block. The largest-free-block is the most useful
+        // signal for fragmentation: createDataChanges fails if no
+        // contiguous 8 kB chunk is available, even if total free is large.
+        void printHeapUsage(const char* label)
+        {
+#if defined(HAL_COMPAT_STM32)
+            struct mallinfo mi = mallinfo();
+            std::printf("heap[%s]: arena=%u used=%u free=%u largest_free=%u keepcost=%u\n",
+                        label,
+                        static_cast<unsigned>(mi.arena),
+                        static_cast<unsigned>(mi.uordblks),
+                        static_cast<unsigned>(mi.fordblks),
+                        static_cast<unsigned>(mi.usmblks),
+                        static_cast<unsigned>(mi.keepcost));
+            std::fflush(stdout);
+#else
+            (void)label;
+#endif
         }
 
         // -- Monitored-item scenario state ----------------------------------
@@ -336,11 +361,25 @@ namespace opcua
             std::uint32_t timeouts = 0;
             constexpr std::uint64_t TIMEOUT_NS = 2ULL * 1000ULL * 1000ULL * 1000ULL; // 2 s
 
+            // NOTE: We deliberately write only to the FIRST monitored
+            // node, not to all N. The earlier batched-write variant
+            // (one WriteValue per monitored item, reusing a stack-local
+            // UA_UInt64 with UA_VARIANT_DATA_NODELETE) corrupted the
+            // newlib heap on STM32, causing HardFaults a few hundred
+            // iterations in. The single-write keeps memory traffic
+            // predictable; the cost is that publish-side load only
+            // scales with the number of registered MIs (server still
+            // has to evaluate sampling/publishing for all N), not with
+            // the number of *changing* items per publish cycle.
+
             for (std::uint32_t i = 0; i < samples; ++i) {
                 const UA_UInt64 seq = static_cast<UA_UInt64>(i + 1);
                 UA_Variant v;
                 UA_Variant_init(&v);
-                UA_Variant_setScalarCopy(&v, &seq, &UA_TYPES[UA_TYPES_UINT64]);
+                if (UA_Variant_setScalarCopy(&v, &seq, &UA_TYPES[UA_TYPES_UINT64]) != UA_STATUSCODE_GOOD) {
+                    UA_Client_Subscriptions_deleteSingle(uaClient, subId);
+                    return false;
+                }
 
                 s_monState.received = false;
                 s_monState.latestValue = 0;
@@ -449,6 +488,7 @@ namespace opcua
             return;
         }
 
+        printHeapUsage("bench-start");
         UA_Client* uaClient = UA_Client_new();
         if (uaClient == nullptr) {
             std::printf("bench: UA_Client_new failed\n");
@@ -516,6 +556,7 @@ namespace opcua
         double loadDuringScenario = 0.0;
         std::uint64_t scenarioElapsedNs = 0;
         std::uint32_t scenarioIdleDelta = 0;
+        printHeapUsage("pre-readrtt");
         const bool ok = runReadRttScenario(uaClient,
                                            WARMUP_ITERATIONS,
                                            BENCH_SAMPLE_COUNT,
@@ -524,6 +565,7 @@ namespace opcua
                                            loadDuringScenario,
                                            scenarioElapsedNs,
                                            scenarioIdleDelta);
+        printHeapUsage("post-readrtt");
         // Idle / post-bench load (no traffic): a single short window after
         // the read loop. Useful as a sanity check that the system returns
         // to ~0 % when the bench is no longer driving requests.
@@ -545,6 +587,10 @@ namespace opcua
                             static_cast<unsigned>(MON_COUNTS[k]),
                             static_cast<unsigned>(MON_SAMPLE_COUNT));
                 std::fflush(stdout);
+                char heapLabel[24];
+                std::snprintf(
+                  heapLabel, sizeof(heapLabel), "pre-mon-N=%u", static_cast<unsigned>(MON_COUNTS[k]));
+                printHeapUsage(heapLabel);
                 monOk[k] = runMonitoredItemsScenario(uaClient,
                                                      m_cpuLoad,
                                                      MON_COUNTS[k],
@@ -553,6 +599,9 @@ namespace opcua
                                                      monLoad[k],
                                                      monElapsedNs[k],
                                                      monIdleDelta[k]);
+                std::snprintf(
+                  heapLabel, sizeof(heapLabel), "post-mon-N=%u", static_cast<unsigned>(MON_COUNTS[k]));
+                printHeapUsage(heapLabel);
             }
         }
 
