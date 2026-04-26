@@ -43,7 +43,11 @@ namespace opcua
         const char* m_endpointUrl{ nullptr };
         bench::CpuLoad m_cpuLoad{};
         TX_THREAD m_thread{};
-        alignas(8) std::array<std::byte, 16384> m_stack{};
+        // 64 kB: open62541's client connect + decode path is stack hungry
+        // on STM32 (8 kB chunk buffers + nested type decoders). 32 kB
+        // overflowed during connect by ~2 kB; observed via GDB stack-error
+        // handler trace (tx_thread_stack_ptr below stack_start).
+        alignas(8) std::array<std::byte, 65536> m_stack{};
         std::atomic<bool> m_running{ false };
     };
 } // namespace opcua

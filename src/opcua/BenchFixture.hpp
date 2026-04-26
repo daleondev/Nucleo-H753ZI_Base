@@ -18,6 +18,17 @@ namespace opcua
     constexpr std::uint32_t BENCH_NODEID_SCALAR_DOUBLE{ 5002 };
     constexpr std::uint32_t BENCH_NODEID_ECHO_U64{ 5003 };
 
+    /*
+     * A pool of writable UInt64 nodes used by the monitored-item benchmark.
+     * NodeIds are BENCH_NODEID_MON_BASE + index, with index in
+     * [0, BENCH_MON_NODE_COUNT). The bench creates a subscription with N of
+     * these as monitored items, writes a sequence number to one of them,
+     * and times the round-trip until the corresponding data-change
+     * notification arrives at the client callback.
+     */
+    constexpr std::uint32_t BENCH_NODEID_MON_BASE{ 6000 };
+    constexpr std::uint32_t BENCH_MON_NODE_COUNT{ 32 };
+
     // Add the benchmark fixture nodes (scalar UInt64, scalar Double, echo
     // UInt64) under Objects. Returns true on success. Must be called after
     // server.start() succeeds and before the server iterate loop is heavily

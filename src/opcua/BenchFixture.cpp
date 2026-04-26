@@ -60,6 +60,13 @@ namespace opcua
                server, BENCH_NODEID_SCALAR_DOUBLE, "bench.scalar_double", UA_TYPES[UA_TYPES_DOUBLE], &zeroD);
         ok = ok &&
              addScalar(server, BENCH_NODEID_ECHO_U64, "bench.echo_u64", UA_TYPES[UA_TYPES_UINT64], &zeroU64);
+
+        for (std::uint32_t i = 0; i < BENCH_MON_NODE_COUNT && ok; ++i) {
+            char browseName[32];
+            std::snprintf(browseName, sizeof(browseName), "bench.mon_u64.%u", static_cast<unsigned>(i));
+            ok = ok && addScalar(
+                         server, BENCH_NODEID_MON_BASE + i, browseName, UA_TYPES[UA_TYPES_UINT64], &zeroU64);
+        }
         return ok;
     }
 } // namespace opcua

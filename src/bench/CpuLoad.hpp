@@ -29,6 +29,16 @@ namespace bench
         // Returns load in [0, 1]. Negative results are clamped to 0.
         double sample(std::uint32_t windowMs);
 
+        // Externally-driven sampling: snapshot the idle counter at any
+        // moment, then compute the load over an arbitrary wall-clock
+        // window using the snapshots and the elapsed nanoseconds. This is
+        // what the bench scenario uses to measure CPU load *during* the
+        // timed read loop, rather than in a separate post-bench window.
+        std::uint32_t counter() const noexcept { return snapshotCounter(); }
+        double loadOver(std::uint32_t deltaIter, std::uint64_t elapsedNs) const noexcept;
+        // Helper for diagnostics: observed iter/s over an arbitrary window.
+        std::uint64_t observedIterPerSec(std::uint32_t deltaIter, std::uint64_t elapsedNs) const noexcept;
+
         std::uint64_t baselineIterPerSec() const noexcept { return m_baselineIterPerSec; }
 
       private:

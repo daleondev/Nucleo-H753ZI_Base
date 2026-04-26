@@ -58,15 +58,31 @@ namespace bench
 
     bool CpuLoad::calibrate(std::uint32_t windowMs)
     {
-        const std::uint32_t before = snapshotCounter();
-        tx_thread_sleep(msToTicks(windowMs));
-        const std::uint32_t after = snapshotCounter();
-        const std::uint32_t delta = static_cast<std::uint32_t>(after - before);
-        if (delta == 0 || windowMs == 0) {
+        if (windowMs == 0) {
             return false;
         }
-        m_baselineIterPerSec =
-          (static_cast<std::uint64_t>(delta) * 1000ULL) / static_cast<std::uint64_t>(windowMs);
+        // Take several samples and keep the *highest* observed rate as the
+        // baseline. Startup transients (DHCP, server init, ARP, lwIP timers)
+        // can briefly suppress idle for hundreds of ms; if we used a single
+        // sample the baseline could be artificially low and the subsequent
+        // scenario would then appear to have *negative* load.
+        constexpr std::uint32_t SAMPLES = 4;
+        std::uint64_t maxRate = 0;
+        for (std::uint32_t i = 0; i < SAMPLES; ++i) {
+            const std::uint32_t before = snapshotCounter();
+            tx_thread_sleep(msToTicks(windowMs));
+            const std::uint32_t after = snapshotCounter();
+            const std::uint32_t delta = static_cast<std::uint32_t>(after - before);
+            const std::uint64_t rate =
+              (static_cast<std::uint64_t>(delta) * 1000ULL) / static_cast<std::uint64_t>(windowMs);
+            if (rate > maxRate) {
+                maxRate = rate;
+            }
+        }
+        if (maxRate == 0) {
+            return false;
+        }
+        m_baselineIterPerSec = maxRate;
         return true;
     }
 
@@ -81,18 +97,40 @@ namespace bench
         const std::uint32_t delta = static_cast<std::uint32_t>(after - before);
         const std::uint64_t observedIterPerSec =
           (static_cast<std::uint64_t>(delta) * 1000ULL) / static_cast<std::uint64_t>(windowMs);
-        if (observedIterPerSec >= m_baselineIterPerSec) {
-            return 0.0;
-        }
+        // Do not clamp at observed >= baseline. Tiny negative loads are a
+        // useful indicator of measurement noise; clamping them to 0 hides
+        // the noise floor and makes a real near-zero load indistinguishable
+        // from a misconfigured baseline.
         const double load =
           1.0 - (static_cast<double>(observedIterPerSec) / static_cast<double>(m_baselineIterPerSec));
-        if (load < 0.0) {
-            return 0.0;
-        }
         if (load > 1.0) {
             return 1.0;
         }
         return load;
+    }
+
+    double CpuLoad::loadOver(std::uint32_t deltaIter, std::uint64_t elapsedNs) const noexcept
+    {
+        if (m_baselineIterPerSec == 0 || elapsedNs == 0) {
+            return 0.0;
+        }
+        // observed iter/s = deltaIter * 1e9 / elapsedNs
+        const std::uint64_t observedIterPerSec =
+          (static_cast<std::uint64_t>(deltaIter) * 1000000000ULL) / elapsedNs;
+        const double load =
+          1.0 - (static_cast<double>(observedIterPerSec) / static_cast<double>(m_baselineIterPerSec));
+        if (load > 1.0) {
+            return 1.0;
+        }
+        return load;
+    }
+
+    std::uint64_t CpuLoad::observedIterPerSec(std::uint32_t deltaIter, std::uint64_t elapsedNs) const noexcept
+    {
+        if (elapsedNs == 0) {
+            return 0;
+        }
+        return (static_cast<std::uint64_t>(deltaIter) * 1000000000ULL) / elapsedNs;
     }
 
     void CpuLoad::txEntry(ULONG argument)
