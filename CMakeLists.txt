@@ -21,6 +21,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     set(TX_USER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
     include("cmake/Platform_STM32.cmake")
 
+    # The toolchain passes this script to ld. Declare it as an explicit build
+    # dependency as well, so linker-only memory-layout edits always relink.
+    set(STM32_LINKER_SCRIPT
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/STM32H753XX_FLASH.ld)
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY
+        LINK_DEPENDS ${STM32_LINKER_SCRIPT})
+
     target_sources(${PROJECT_NAME}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp

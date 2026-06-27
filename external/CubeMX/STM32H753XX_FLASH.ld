@@ -55,8 +55,9 @@ ENTRY(Reset_Handler)
 /* Specify the memory areas */
 MEMORY
 {
-DTCMRAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
-RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
+DTCMRAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 124K
+DTCM_STACK (xrw)      : ORIGIN = 0x2001F000, LENGTH = 4K
+AXI_SRAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 128K
 ETH_BUFFER_RAM (xrw)      : ORIGIN = 0x30020000, LENGTH = 128K
 ETH_DESCRIPTOR_RAM (xrw)      : ORIGIN = 0x30040000, LENGTH = 512
@@ -66,12 +67,12 @@ ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
 FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 2048K
 }
 
-/* Highest address of the user mode stack */
-_estack = ORIGIN(DTCMRAM) + LENGTH(DTCMRAM);    /* end of RAM */
-_sstack = _estack - _Min_Stack_Size;
-/* Generate a link error if heap and stack don't fit into RAM */
-_Min_Heap_Size = 0x200;      /* required amount of heap  */
-_Min_Stack_Size = 0x400; /* required amount of stack */
+/* Keep the Cortex-M7 main/interrupt stack in deterministic, tightly coupled DTCM.
+ * General application data and the C/C++ heap live in the larger AXI SRAM. */
+_Min_Heap_Size = 0x200;  /* minimum reserved C/C++ heap space */
+_Min_Stack_Size = LENGTH(DTCM_STACK);
+_estack = ORIGIN(DTCM_STACK) + LENGTH(DTCM_STACK);
+_sstack = ORIGIN(DTCM_STACK);
 
 /* Define output sections */
 SECTIONS
@@ -158,7 +159,7 @@ SECTIONS
   /* used by the startup to initialize data */
   _sidata = LOADADDR(.data);
 
-  /* Initialized data sections goes into RAM, load LMA copy after code */
+  /* General initialized data belongs in bus-accessible AXI SRAM. */
   .data :
   {
     . = ALIGN(4);
@@ -169,7 +170,7 @@ SECTIONS
     *(.RamFunc*)       /* .RamFunc* sections */
 
     . = ALIGN(4);
-  } >DTCMRAM AT> FLASH
+  } >AXI_SRAM AT> FLASH
 
  /* Initialized TLS data section */
   .tdata : ALIGN(4)
@@ -179,7 +180,7 @@ SECTIONS
     _edata = .;        /* define a global symbol at data end */
     PROVIDE(__data_end = .);
     PROVIDE(__tdata_end = .);
-  } >DTCMRAM AT> FLASH
+  } >AXI_SRAM AT> FLASH
 
   PROVIDE( __tdata_start = ADDR(.tdata) );
   PROVIDE( __tdata_size = __tdata_end - __tdata_start );
@@ -203,7 +204,7 @@ SECTIONS
     *(.tbss .tbss.*)
     . = ALIGN(4);
     PROVIDE( __tbss_end = . );
-  } >DTCMRAM
+  } >AXI_SRAM
 
   PROVIDE( __tbss_start = ADDR(.tbss) );
   PROVIDE( __tbss_size = __tbss_end - __tbss_start );
@@ -227,22 +228,44 @@ SECTIONS
     _ebss = .;         /* define a global symbol at bss end */
     __bss_end__ = _ebss;
       PROVIDE( __bss_end = .);
-  } >DTCMRAM
+  } >AXI_SRAM
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
 
-  /* User_heap_stack section, used to check that there is enough RAM left */
-  ._user_heap_stack (NOLOAD) :
+  /* Reserve the minimum heap in AXI SRAM. The application-owned _sbrk()
+   * may grow from __HeapBase up to __HeapLimit. Keep this as the final
+   * output section assigned to AXI_SRAM so the upper bound remains valid. */
+  ._user_heap (NOLOAD) :
   {
     . = ALIGN(8);
-    PROVIDE ( end = . );
-    PROVIDE ( _end = . );
+    end = .;
+    _end = .;
+    __HeapBase = .;
     . = . + _Min_Heap_Size;
+    . = ALIGN(8);
+    __HeapReservedEnd = .;
+    __HeapLimit = ORIGIN(AXI_SRAM) + LENGTH(AXI_SRAM);
+  } >AXI_SRAM
+
+  /* The MSP is used as the ThreadX system/interrupt stack. Place it at the
+   * top of DTCM and reserve it independently from the AXI SRAM heap. */
+  .stack (NOLOAD) :
+  {
+    . = ALIGN(8);
+    __StackLimit = .;
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
-  } >DTCMRAM
+    __StackTop = .;
+  } >DTCM_STACK
+
+  ASSERT(__HeapReservedEnd <= __HeapLimit,
+         "Minimum heap does not fit in AXI SRAM")
+  ASSERT(__StackTop == _estack,
+         "Main stack does not end at the top of DTCM")
+  ASSERT((ORIGIN(DTCMRAM) + LENGTH(DTCMRAM)) == ORIGIN(DTCM_STACK),
+         "DTCM data and stack regions must be contiguous")
 
   /* Normal, shareable, non-cacheable SRAM2 for raw Ethernet frame buffers. */
   .EthBufferSection (NOLOAD) :
@@ -250,6 +273,7 @@ SECTIONS
     . = ALIGN(32);
     __eth_buffer_start__ = .;
     KEEP(*(.EthBufferSection))
+    KEEP(*(.Rx_PoolSection))
     . = ALIGN(32);
     __eth_buffer_end__ = .;
   } >ETH_BUFFER_RAM
