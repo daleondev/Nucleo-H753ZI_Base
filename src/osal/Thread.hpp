@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Mutex.hpp"
 #include "Semaphore.hpp"
 
 #include <array>
@@ -7,6 +8,8 @@
 #include <cstdio>
 #include <format>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <span>
 
@@ -16,33 +19,34 @@ namespace osal
 {
     class Thread
     {
-      private:
-        inline static std::atomic_size_t s_id{ 0UZ };
-
       public:
         template<typename Func, typename... Args>
-        Thread(int prio, std::span<std::byte> stack, Func&& func, Args&&... args)
-          : Thread(std::format("Thread_{}", s_id++),
+        Thread(uint32_t prio, std::span<std::byte> stack, Func&& func, Args&&... args)
+          : Thread(std::format("Thread_{}", nextThreadId()),
                    prio,
                    stack,
                    std::forward<Func>(func),
                    std::forward<Args>(args)...) {};
 
         template<typename Func, typename... Args>
-        Thread(std::string_view name, int prio, std::span<std::byte> stack, Func&& func, Args&&... args)
-          : m_name{ name }
+        Thread(std::string_view name, uint32_t prio, std::span<std::byte> stack, Func&& func, Args&&... args)
+          : m_id{ nextId() }
+          , m_name{ name }
           , m_prio{ prio }
           , m_stack{ stack }
           , m_task{ [f = std::forward<Func>(func), ... a = std::forward<Args>(args)] {
               std::invoke(std::move(f), std::move(a)...);
           } }
-          , m_taskDone{ std::format("{}_Done_Semaphore", m_name) }
         {
-            auto self{ reinterpret_cast<uintptr_t>(this) };
+            {
+                std::scoped_lock lock(s_registryMutex);
+                s_registry[m_id] = this;
+            }
+
             auto ret{ tx_thread_create(&m_thread,
                                        const_cast<CHAR*>(m_name.data()),
-                                       taskWrapper,
-                                       static_cast<ULONG>(self),
+                                       run,
+                                       m_id,
                                        m_stack.data(),
                                        m_stack.size(),
                                        m_prio,
@@ -57,19 +61,26 @@ namespace osal
         Thread(const Thread&) = delete;
         auto operator=(const Thread&) -> Thread& = delete;
 
-        Thread(Thread&& other);
-        auto operator=(Thread&& other) -> Thread&;
+        Thread(Thread&& other) = delete;
+        auto operator=(Thread&& other) -> Thread& = delete;
 
         auto join() -> void;
 
       private:
-        static auto taskWrapper(ULONG context) -> VOID;
+        static auto run(ULONG id) -> VOID;
+        static auto nextId() -> ULONG;
+        static auto nextThreadId() -> std::size_t;
 
+        ULONG m_id;
         std::string m_name;
-        int m_prio;
+        uint32_t m_prio;
         std::span<std::byte> m_stack;
         std::function<void()> m_task;
-        Semaphore m_taskDone;
-        TX_THREAD m_thread;
+        bool m_joined{ false };
+        Semaphore m_taskDone{ std::format("{}_Done_Semaphore", m_name) };
+        TX_THREAD m_thread{};
+
+        inline static Mutex s_registryMutex{ "Thread_Registry_Mutex" };
+        inline static std::map<ULONG, Thread*> s_registry;
     };
 }

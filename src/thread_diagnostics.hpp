@@ -2,5 +2,5 @@
 
 namespace thread_diagnostics
 {
-    void printAll();
+    void print_all();
 }

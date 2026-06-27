@@ -11,7 +11,6 @@ extern "C" {
 #include "rtc.h"
 #include "tim.h"
 
-extern COM_InitTypeDef BspCOMInit;
 void SystemClock_Config(void);
 void MPU_Config_User(void);
 HAL_StatusTypeDef platform_init_libc_locks(void);

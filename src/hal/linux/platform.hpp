@@ -6,6 +6,9 @@ extern "C" {
 
 #include <stdint.h>
 
+// These declarations intentionally mirror the STM32 HAL C ABI.
+// NOLINTBEGIN(modernize-use-using,performance-enum-size)
+
 typedef enum
 {
     HAL_OK = 0x00U,
@@ -63,8 +66,6 @@ typedef struct
     uint32_t HwFlowCtl;
 } COM_InitTypeDef;
 
-extern COM_InitTypeDef BspCOMInit;
-
 HAL_StatusTypeDef HAL_Init(void);
 void SystemClock_Config(void);
 void MPU_Config_User(void);
@@ -86,6 +87,8 @@ int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init);
 
 HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef* timer_handle);
 void Error_Handler(void);
+
+// NOLINTEND(modernize-use-using,performance-enum-size)
 
 #ifdef __cplusplus
 }

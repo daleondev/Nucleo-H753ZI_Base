@@ -1,7 +1,6 @@
 #include "Mutex.hpp"
 
 #include <atomic>
-#include <cstdio>
 #include <format>
 
 #include <cassert> // tmp
@@ -10,11 +9,15 @@ namespace osal
 {
     namespace
     {
-        std::atomic_size_t g_id{ 0UZ };
+        auto next_mutex_id() -> std::size_t
+        {
+            static std::atomic_size_t id{};
+            return id.fetch_add(1);
+        }
     }
 
     Mutex::Mutex()
-      : Mutex(std::format("Mutex_{}", g_id++))
+      : Mutex(std::format("Mutex_{}", next_mutex_id()))
     {
     }
 

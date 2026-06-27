@@ -10,12 +10,17 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace
 {
     constexpr size_t MAIN_THREAD_STACK_SIZE{ 4096 };
     constexpr UINT MAIN_THREAD_PRIO{ 15 };
     constexpr ULONG BLINK_PERIOD_MS{ 100 };
+    constexpr std::size_t STACK_ALIGNMENT{ 8U };
+    constexpr std::uint32_t FNV_OFFSET_BASIS{ 2166136261U };
+    constexpr std::uint32_t FNV_PRIME{ 16777619U };
+    constexpr std::uint32_t COM_BAUD_RATE{ 115200U };
 
 #if defined(ENABLE_LIBC_LOCK_TEST)
     constexpr size_t LIBC_LOCK_TEST_STACK_SIZE{ 2048 };
@@ -32,13 +37,15 @@ namespace
     constexpr std::uint32_t THREADSAFE_STATIC_TEST_VALUE{ 0x51A71C42U };
 #endif
 
-    alignas(8) std::array<std::byte, MAIN_THREAD_STACK_SIZE> main_thread_stack{};
+    // ThreadX owns and mutates these statically allocated control blocks and stacks.
+    // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    alignas(STACK_ALIGNMENT) std::array<std::byte, MAIN_THREAD_STACK_SIZE> main_thread_stack{};
     CHAR main_thread_name[] = "Main Thread";
     TX_THREAD main_thread;
 
 #if defined(ENABLE_LIBC_LOCK_TEST)
-    alignas(8) std::array<std::byte, LIBC_LOCK_TEST_STACK_SIZE> libc_lock_test_stack_0{};
-    alignas(8) std::array<std::byte, LIBC_LOCK_TEST_STACK_SIZE> libc_lock_test_stack_1{};
+    alignas(STACK_ALIGNMENT) std::array<std::byte, LIBC_LOCK_TEST_STACK_SIZE> libc_lock_test_stack_0{};
+    alignas(STACK_ALIGNMENT) std::array<std::byte, LIBC_LOCK_TEST_STACK_SIZE> libc_lock_test_stack_1{};
     CHAR libc_lock_test_name_0[] = "libc lock test 0";
     CHAR libc_lock_test_name_1[] = "libc lock test 1";
     CHAR libc_lock_test_done_name[] = "libc lock test done";
@@ -48,8 +55,10 @@ namespace
 #endif
 
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_0{};
-    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_1{};
+    alignas(STACK_ALIGNMENT) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE>
+      threadsafe_static_test_stack_0{};
+    alignas(STACK_ALIGNMENT) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE>
+      threadsafe_static_test_stack_1{};
     CHAR threadsafe_static_test_name_0[] = "static init test 0";
     CHAR threadsafe_static_test_name_1[] = "static init test 1";
     CHAR threadsafe_static_test_done_name[] = "static init done";
@@ -63,6 +72,7 @@ namespace
     std::array<ThreadsafeStaticTestSingleton*, THREADSAFE_STATIC_TEST_THREAD_COUNT>
       threadsafe_static_test_instances{};
 #endif
+    // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 
     constexpr ULONG milliseconds_to_ticks(ULONG milliseconds)
     {
@@ -80,7 +90,8 @@ namespace
     void thread_stack_error_handler(TX_THREAD* thread)
     {
         const auto* thread_name = thread != TX_NULL ? thread->tx_thread_name : "Unknown";
-        std::printf("Thread %s stack overflow detected\r\n", thread_name);
+        const std::string message{ std::string{ "Thread " } + thread_name + " stack overflow detected\r\n" };
+        std::fputs(message.c_str(), stdout);
         std::fflush(stdout);
         Error_Handler();
     }
@@ -88,11 +99,11 @@ namespace
 #if defined(ENABLE_LIBC_LOCK_TEST)
     std::uint32_t hash_buffer(const char* buffer, std::size_t size)
     {
-        std::uint32_t hash{ 2166136261U };
+        std::uint32_t hash{ FNV_OFFSET_BASIS };
 
         for (std::size_t index{}; index < size; ++index) {
             hash ^= static_cast<std::uint8_t>(buffer[index]);
-            hash *= 16777619U;
+            hash *= FNV_PRIME;
         }
 
         return hash;
@@ -102,12 +113,17 @@ namespace
     {
         for (ULONG iteration{}; iteration < LIBC_LOCK_TEST_ITERATIONS; ++iteration) {
             const std::size_t buffer_size{ 48U + ((worker_id * 7U + iteration) % 32U) };
+            // This test intentionally exercises Newlib's malloc lock hooks.
+            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
             auto* const buffer{ static_cast<char*>(std::malloc(buffer_size)) };
 
             if (buffer == nullptr) {
                 Error_Handler();
+                return;
             }
 
+            // This test intentionally exercises Newlib's stdio lock hooks.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
             const int written{ std::snprintf(buffer,
                                              buffer_size,
                                              "worker=%lu iteration=%lu",
@@ -130,12 +146,12 @@ namespace
                 Error_Handler();
             }
 
+            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
             std::free(buffer);
         }
 
-        if (std::printf("[libc-lock-test] worker %lu passed\r\n", static_cast<unsigned long>(worker_id)) <
-              0 ||
-            std::fflush(stdout) != 0) {
+        const std::string message{ "[libc-lock-test] worker " + std::to_string(worker_id) + " passed\r\n" };
+        if (std::fputs(message.c_str(), stdout) == EOF || std::fflush(stdout) != 0) {
             Error_Handler();
         }
 
@@ -197,8 +213,9 @@ namespace
     }
 #endif
 
-    void tx_main(ULONG)
+    void tx_main(ULONG unused)
     {
+        static_cast<void>(unused);
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
         for (ULONG worker{}; worker < THREADSAFE_STATIC_TEST_THREAD_COUNT; ++worker) {
             assert_tx_call(tx_semaphore_get(&threadsafe_static_test_done, TX_WAIT_FOREVER));
@@ -211,7 +228,7 @@ namespace
             Error_Handler();
         }
 
-        if (std::printf("[threadsafe-static-test] singleton initialized once\r\n") < 0 ||
+        if (std::fputs("[threadsafe-static-test] singleton initialized once\r\n", stdout) == EOF ||
             std::fflush(stdout) != 0) {
             Error_Handler();
         }
@@ -222,20 +239,19 @@ namespace
             assert_tx_call(tx_semaphore_get(&libc_lock_test_done, TX_WAIT_FOREVER));
         }
 
-        if (std::printf("[libc-lock-test] all workers passed\r\n") < 0 || std::fflush(stdout) != 0) {
+        if (std::fputs("[libc-lock-test] all workers passed\r\n", stdout) == EOF ||
+            std::fflush(stdout) != 0) {
             Error_Handler();
         }
 #endif
 
-        thread_diagnostics::printAll();
+        thread_diagnostics::print_all();
 
         const auto blink_period_ticks{ milliseconds_to_ticks(BLINK_PERIOD_MS) };
 
         while (true) {
-            assert_tx_call(
-              static_cast<UINT>(BSP_LED_Toggle(LED_GREEN) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE));
-            assert_tx_call(
-              static_cast<UINT>(BSP_LED_Toggle(LED_RED) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE));
+            assert_tx_call(BSP_LED_Toggle(LED_GREEN) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE);
+            assert_tx_call(BSP_LED_Toggle(LED_RED) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE);
             tx_thread_sleep(blink_period_ticks);
         }
     }
@@ -315,7 +331,7 @@ extern "C" void tx_application_define(void* first_unused_memory)
 #endif
 }
 
-int main(void)
+int main()
 {
     MPU_Config_User();
     SCB_EnableICache();
@@ -335,13 +351,14 @@ int main(void)
     BSP_LED_Init(LED_RED);
     BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
 
-    BspCOMInit.BaudRate = 115200;
-    BspCOMInit.WordLength = COM_WORDLENGTH_8B;
-    BspCOMInit.StopBits = COM_STOPBITS_1;
-    BspCOMInit.Parity = COM_PARITY_NONE;
-    BspCOMInit.HwFlowCtl = COM_HWCONTROL_NONE;
+    COM_InitTypeDef bsp_com_init{};
+    bsp_com_init.BaudRate = COM_BAUD_RATE;
+    bsp_com_init.WordLength = COM_WORDLENGTH_8B;
+    bsp_com_init.StopBits = COM_STOPBITS_1;
+    bsp_com_init.Parity = COM_PARITY_NONE;
+    bsp_com_init.HwFlowCtl = COM_HWCONTROL_NONE;
 
-    if (BSP_COM_Init(COM1, &BspCOMInit) != BSP_ERROR_NONE) {
+    if (BSP_COM_Init(COM1, &bsp_com_init) != BSP_ERROR_NONE) {
         Error_Handler();
     }
 

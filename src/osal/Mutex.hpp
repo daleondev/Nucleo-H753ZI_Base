@@ -26,6 +26,6 @@ namespace osal
 
       private:
         std::string m_name;
-        TX_MUTEX m_mutex;
+        TX_MUTEX m_mutex{};
     };
 }

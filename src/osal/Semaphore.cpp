@@ -1,7 +1,6 @@
 #include "Semaphore.hpp"
 
 #include <atomic>
-#include <cstdio>
 #include <format>
 
 #include <cassert> // tmp
@@ -10,11 +9,15 @@ namespace osal
 {
     namespace
     {
-        std::atomic_size_t g_id{ 0UZ };
+        auto next_semaphore_id() -> std::size_t
+        {
+            static std::atomic_size_t id{};
+            return id.fetch_add(1);
+        }
     }
 
     Semaphore::Semaphore()
-      : Semaphore(std::format("Semaphore_{}", g_id++))
+      : Semaphore(std::format("Semaphore_{}", next_semaphore_id()))
     {
     }
 

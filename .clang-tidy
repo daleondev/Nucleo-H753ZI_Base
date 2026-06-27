@@ -15,7 +15,7 @@ Checks: >
   -cppcoreguidelines-pro-bounds-constant-array-index
 
 WarningsAsErrors: "*"
-HeaderFilterRegex: '.*/(src|hal_compat)/.*'
+HeaderFilterRegex: '.*/src/.*'
 CheckOptions:
   - key: readability-identifier-naming.MacroDefinitionCase
     value: UPPER_CASE

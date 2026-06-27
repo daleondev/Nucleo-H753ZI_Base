@@ -27,6 +27,6 @@ namespace osal
 
       private:
         std::string m_name;
-        TX_SEMAPHORE m_semaphore;
+        TX_SEMAPHORE m_semaphore{};
     };
 }
