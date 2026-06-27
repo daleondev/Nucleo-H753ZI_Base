@@ -6,19 +6,16 @@ target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING TX_LINUX_MULT
 
 find_package(Threads REQUIRED)
 
-add_library(PlatformConfig INTERFACE)
+add_library(Platform INTERFACE)
 
-target_link_libraries(PlatformConfig
+target_link_libraries(Platform
     INTERFACE
         threadx
         Threads::Threads
         rt
 )
 
-target_compile_definitions(PlatformConfig
+target_compile_definitions(Platform
     INTERFACE
         $<$<CONFIG:Debug>:DEBUG>
 )
-
-add_library(Platform INTERFACE)
-target_link_libraries(Platform INTERFACE PlatformConfig)

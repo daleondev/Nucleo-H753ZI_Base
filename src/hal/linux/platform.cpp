@@ -1,4 +1,4 @@
-#include "hal_compat/hal_compat_linux.hpp"
+#include "platform.hpp"
 
 #include <array>
 #include <cstdio>

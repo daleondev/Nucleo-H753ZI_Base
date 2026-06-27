@@ -15,20 +15,10 @@ else()
     message(FATAL_ERROR "Unsupported target system: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-add_subdirectory(hal_compat)
-
-add_executable(${PROJECT_NAME}
-    src/main.cpp
-)
-
-target_include_directories(${PROJECT_NAME}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+add_executable(${PROJECT_NAME})
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
-        HalCompat
         Platform
 )
 
@@ -94,3 +84,5 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
         VERBATIM
     )
 endif()
+
+add_subdirectory(src)

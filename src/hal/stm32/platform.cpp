@@ -1,4 +1,4 @@
-#include "hal_compat/hal_compat_stm32.hpp"
+#include "platform.hpp"
 
 #include <sys/lock.h>
 
@@ -103,10 +103,7 @@ namespace
         return true;
     }
 
-    CxxGuard load_cxx_guard(const CxxGuard* guard)
-    {
-        return __atomic_load_n(guard, __ATOMIC_ACQUIRE);
-    }
+    CxxGuard load_cxx_guard(const CxxGuard* guard) { return __atomic_load_n(guard, __ATOMIC_ACQUIRE); }
 
     void store_cxx_guard(CxxGuard* guard, CxxGuard value)
     {
@@ -246,5 +243,4 @@ void __retarget_lock_release(_LOCK_T lock)
 }
 
 void __retarget_lock_release_recursive(_LOCK_T lock) { __retarget_lock_release(lock); }
-
 }

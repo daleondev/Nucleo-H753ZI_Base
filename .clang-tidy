@@ -83,4 +83,7 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.ConceptCase
     value: CamelCase
+
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
 ...
