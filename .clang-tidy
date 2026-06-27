@@ -1,5 +1,20 @@
 ---
-Checks: 'readability-identifier-naming'
+Checks: >
+  readability-*,
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  -readability-identifier-length,
+  -readability-braces-around-statements,
+  -readability-implicit-bool-conversion,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index
+
+WarningsAsErrors: "*"
 HeaderFilterRegex: '.*/(src|hal_compat)/.*'
 CheckOptions:
   - key: readability-identifier-naming.MacroDefinitionCase

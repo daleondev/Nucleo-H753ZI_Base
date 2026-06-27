@@ -5,6 +5,7 @@ option(ENABLE_LIBC_LOCK_TEST "Run the two-thread libc lock self-test at startup"
 option(ENABLE_THREADSAFE_STATIC_TEST
        "Run the contended function-local static initialization self-test at startup"
        ON)
+option(ENABLE_CLANG_TIDY "Run clang-tidy while compiling project-owned C++ targets" OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(cmake/Platform_Linux.cmake)
@@ -44,6 +45,13 @@ target_compile_options(${PROJECT_NAME}
     PRIVATE
         $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
+
+if(ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
+    set_target_properties(${PROJECT_NAME} HalCompat PROPERTIES
+        CXX_CLANG_TIDY "${CLANG_TIDY_EXECUTABLE}"
+    )
+endif()
 
 if(ENABLE_LIBC_LOCK_TEST)
     target_compile_definitions(${PROJECT_NAME}
