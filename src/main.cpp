@@ -46,10 +46,8 @@ namespace
 #endif
 
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE>
-      threadsafe_static_test_stack_0{};
-    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE>
-      threadsafe_static_test_stack_1{};
+    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_0{};
+    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_1{};
     CHAR threadsafe_static_test_name_0[] = "static init test 0";
     CHAR threadsafe_static_test_name_1[] = "static init test 1";
     CHAR threadsafe_static_test_done_name[] = "static init done";
@@ -64,20 +62,20 @@ namespace
       threadsafe_static_test_instances{};
 #endif
 
-    constexpr ULONG MillisecondsToTicks(ULONG milliseconds)
+    constexpr ULONG milliseconds_to_ticks(ULONG milliseconds)
     {
         const auto ticks = (milliseconds * TX_TIMER_TICKS_PER_SECOND + 999UL) / 1000UL;
         return ticks == 0 ? 1UL : ticks;
     }
 
-    void AssertTxCall(UINT status)
+    void assert_tx_call(UINT status)
     {
         if (status != TX_SUCCESS) {
             Error_Handler();
         }
     }
 
-    void ThreadStackErrorHandler(TX_THREAD* thread)
+    void thread_stack_error_handler(TX_THREAD* thread)
     {
         const auto* thread_name = thread != TX_NULL ? thread->tx_thread_name : "Unknown";
         std::printf("Thread %s stack overflow detected\n", thread_name);
@@ -86,7 +84,7 @@ namespace
     }
 
 #if defined(ENABLE_LIBC_LOCK_TEST)
-    std::uint32_t HashBuffer(const char* buffer, std::size_t size)
+    std::uint32_t hash_buffer(const char* buffer, std::size_t size)
     {
         std::uint32_t hash{ 2166136261U };
 
@@ -98,7 +96,7 @@ namespace
         return hash;
     }
 
-    void LibcLockTestWorker(ULONG worker_id)
+    void libc_lock_test_worker(ULONG worker_id)
     {
         for (ULONG iteration{}; iteration < LIBC_LOCK_TEST_ITERATIONS; ++iteration) {
             const std::size_t buffer_size{ 48U + ((worker_id * 7U + iteration) % 32U) };
@@ -114,39 +112,38 @@ namespace
                                              static_cast<unsigned long>(worker_id),
                                              static_cast<unsigned long>(iteration)) };
 
-            if (written < 0 || static_cast<std::size_t>(written) >= buffer_size
-                || buffer[written] != '\0' || std::fflush(stdout) != 0) {
+            if (written < 0 || static_cast<std::size_t>(written) >= buffer_size || buffer[written] != '\0' ||
+                std::fflush(stdout) != 0) {
                 Error_Handler();
             }
 
             const std::size_t used_size{ static_cast<std::size_t>(written) + 1U };
-            const std::uint32_t expected_hash{ HashBuffer(buffer, used_size) };
+            const std::uint32_t expected_hash{ hash_buffer(buffer, used_size) };
 
             /* Keep this allocation live while the peer exercises malloc and
              * stdio. A one-tick time slice also permits preemption inside libc. */
             tx_thread_relinquish();
 
-            if (HashBuffer(buffer, used_size) != expected_hash) {
+            if (hash_buffer(buffer, used_size) != expected_hash) {
                 Error_Handler();
             }
 
             std::free(buffer);
         }
 
-        if (std::printf("[libc-lock-test] worker %lu passed\n",
-                        static_cast<unsigned long>(worker_id)) < 0
-            || std::fflush(stdout) != 0) {
+        if (std::printf("[libc-lock-test] worker %lu passed\n", static_cast<unsigned long>(worker_id)) < 0 ||
+            std::fflush(stdout) != 0) {
             Error_Handler();
         }
 
-        AssertTxCall(tx_semaphore_put(&libc_lock_test_done));
+        assert_tx_call(tx_semaphore_put(&libc_lock_test_done));
     }
 #endif
 
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
     class ThreadsafeStaticTestSingleton
     {
-    public:
+      public:
         ThreadsafeStaticTestSingleton()
         {
             threadsafe_static_test_constructor_count.fetch_add(1U, std::memory_order_relaxed);
@@ -155,71 +152,71 @@ namespace
              * -fno-threadsafe-statics both threads enter this constructor; with
              * a non-RTOS guard the peer fails instead of blocking. */
             ULONG waited_ticks{};
-            while (threadsafe_static_test_access_count.load(std::memory_order_acquire)
-                     < THREADSAFE_STATIC_TEST_THREAD_COUNT
-                   && waited_ticks < THREADSAFE_STATIC_TEST_MAX_WAIT_TICKS) {
+            while (threadsafe_static_test_access_count.load(std::memory_order_acquire) <
+                     THREADSAFE_STATIC_TEST_THREAD_COUNT &&
+                   waited_ticks < THREADSAFE_STATIC_TEST_MAX_WAIT_TICKS) {
                 tx_thread_sleep(1U);
                 ++waited_ticks;
             }
 
-            if (threadsafe_static_test_access_count.load(std::memory_order_acquire)
-                != THREADSAFE_STATIC_TEST_THREAD_COUNT) {
+            if (threadsafe_static_test_access_count.load(std::memory_order_acquire) !=
+                THREADSAFE_STATIC_TEST_THREAD_COUNT) {
                 Error_Handler();
             }
 
-            value_ = THREADSAFE_STATIC_TEST_VALUE;
+            m_value = THREADSAFE_STATIC_TEST_VALUE;
         }
 
-        std::uint32_t Value() const { return value_; }
+        std::uint32_t value() const { return m_value; }
 
-    private:
-        std::uint32_t value_{};
+      private:
+        std::uint32_t m_value{};
     };
 
-    ThreadsafeStaticTestSingleton& GetThreadsafeStaticTestSingleton()
+    ThreadsafeStaticTestSingleton& get_threadsafe_static_test_singleton()
     {
         static ThreadsafeStaticTestSingleton singleton;
         return singleton;
     }
 
-    void ThreadsafeStaticTestWorker(ULONG worker_id)
+    void threadsafe_static_test_worker(ULONG worker_id)
     {
         threadsafe_static_test_access_count.fetch_add(1U, std::memory_order_release);
-        auto& singleton = GetThreadsafeStaticTestSingleton();
+        auto& singleton = get_threadsafe_static_test_singleton();
 
-        if (worker_id >= threadsafe_static_test_instances.size()
-            || singleton.Value() != THREADSAFE_STATIC_TEST_VALUE) {
+        if (worker_id >= threadsafe_static_test_instances.size() ||
+            singleton.value() != THREADSAFE_STATIC_TEST_VALUE) {
             Error_Handler();
         }
 
         threadsafe_static_test_instances[worker_id] = &singleton;
-        AssertTxCall(tx_semaphore_put(&threadsafe_static_test_done));
+        assert_tx_call(tx_semaphore_put(&threadsafe_static_test_done));
     }
 #endif
 
-    void TxMain(ULONG)
+    void tx_main(ULONG)
     {
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
         for (ULONG worker{}; worker < THREADSAFE_STATIC_TEST_THREAD_COUNT; ++worker) {
-            AssertTxCall(tx_semaphore_get(&threadsafe_static_test_done, TX_WAIT_FOREVER));
+            assert_tx_call(tx_semaphore_get(&threadsafe_static_test_done, TX_WAIT_FOREVER));
         }
 
-        if (threadsafe_static_test_constructor_count.load(std::memory_order_acquire) != 1U
-            || threadsafe_static_test_instances[0] == nullptr
-            || threadsafe_static_test_instances[0] != threadsafe_static_test_instances[1]
-            || threadsafe_static_test_instances[0]->Value() != THREADSAFE_STATIC_TEST_VALUE) {
+        if (threadsafe_static_test_constructor_count.load(std::memory_order_acquire) != 1U ||
+            threadsafe_static_test_instances[0] == nullptr ||
+            threadsafe_static_test_instances[0] != threadsafe_static_test_instances[1] ||
+            threadsafe_static_test_instances[0]->value() != THREADSAFE_STATIC_TEST_VALUE) {
             Error_Handler();
         }
 
-        if (std::printf("[threadsafe-static-test] singleton initialized once\n") < 0
-            || std::fflush(stdout) != 0) {
+        if (std::printf("[threadsafe-static-test] singleton initialized once\n") < 0 ||
+            std::fflush(stdout) != 0) {
             Error_Handler();
         }
 #endif
 
 #if defined(ENABLE_LIBC_LOCK_TEST)
         for (ULONG worker{}; worker < LIBC_LOCK_TEST_THREAD_COUNT; ++worker) {
-            AssertTxCall(tx_semaphore_get(&libc_lock_test_done, TX_WAIT_FOREVER));
+            assert_tx_call(tx_semaphore_get(&libc_lock_test_done, TX_WAIT_FOREVER));
         }
 
         if (std::printf("[libc-lock-test] all workers passed\n") < 0 || std::fflush(stdout) != 0) {
@@ -227,12 +224,12 @@ namespace
         }
 #endif
 
-        const auto blink_period_ticks{ MillisecondsToTicks(BLINK_PERIOD_MS) };
+        const auto blink_period_ticks{ milliseconds_to_ticks(BLINK_PERIOD_MS) };
 
         while (true) {
-            AssertTxCall(
+            assert_tx_call(
               static_cast<UINT>(BSP_LED_Toggle(LED_GREEN) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE));
-            AssertTxCall(
+            assert_tx_call(
               static_cast<UINT>(BSP_LED_Toggle(LED_RED) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE));
             tx_thread_sleep(blink_period_ticks);
         }
@@ -244,74 +241,73 @@ extern "C" void tx_application_define(void* first_unused_memory)
 {
     static_cast<void>(first_unused_memory);
 
-    if (Platform_InitLibcLocks() != HAL_OK) {
+    if (platform_init_libc_locks() != HAL_OK) {
         Error_Handler();
     }
 
-    AssertTxCall(tx_thread_stack_error_notify(ThreadStackErrorHandler));
+    assert_tx_call(tx_thread_stack_error_notify(thread_stack_error_handler));
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    AssertTxCall(tx_semaphore_create(
-      &threadsafe_static_test_done, threadsafe_static_test_done_name, 0));
+    assert_tx_call(tx_semaphore_create(&threadsafe_static_test_done, threadsafe_static_test_done_name, 0));
 #endif
 #if defined(ENABLE_LIBC_LOCK_TEST)
-    AssertTxCall(tx_semaphore_create(&libc_lock_test_done, libc_lock_test_done_name, 0));
+    assert_tx_call(tx_semaphore_create(&libc_lock_test_done, libc_lock_test_done_name, 0));
 #endif
 
-    AssertTxCall(tx_thread_create(&main_thread,
-                                  main_thread_name,
-                                  TxMain,
-                                  0,
-                                  main_thread_stack.data(),
-                                  static_cast<ULONG>(main_thread_stack.size()),
-                                  MAIN_THREAD_PRIO,
-                                  MAIN_THREAD_PRIO,
-                                  TX_NO_TIME_SLICE,
-                                  TX_AUTO_START));
+    assert_tx_call(tx_thread_create(&main_thread,
+                                    main_thread_name,
+                                    tx_main,
+                                    0,
+                                    main_thread_stack.data(),
+                                    static_cast<ULONG>(main_thread_stack.size()),
+                                    MAIN_THREAD_PRIO,
+                                    MAIN_THREAD_PRIO,
+                                    TX_NO_TIME_SLICE,
+                                    TX_AUTO_START));
 
 #if defined(ENABLE_LIBC_LOCK_TEST)
-    AssertTxCall(tx_thread_create(&libc_lock_test_thread_0,
-                                  libc_lock_test_name_0,
-                                  LibcLockTestWorker,
-                                  0,
-                                  libc_lock_test_stack_0.data(),
-                                  static_cast<ULONG>(libc_lock_test_stack_0.size()),
-                                  LIBC_LOCK_TEST_PRIO,
-                                  LIBC_LOCK_TEST_PRIO,
-                                  1,
-                                  TX_AUTO_START));
-    AssertTxCall(tx_thread_create(&libc_lock_test_thread_1,
-                                  libc_lock_test_name_1,
-                                  LibcLockTestWorker,
-                                  1,
-                                  libc_lock_test_stack_1.data(),
-                                  static_cast<ULONG>(libc_lock_test_stack_1.size()),
-                                  LIBC_LOCK_TEST_PRIO,
-                                  LIBC_LOCK_TEST_PRIO,
-                                  1,
-                                  TX_AUTO_START));
+    assert_tx_call(tx_thread_create(&libc_lock_test_thread_0,
+                                    libc_lock_test_name_0,
+                                    libc_lock_test_worker,
+                                    0,
+                                    libc_lock_test_stack_0.data(),
+                                    static_cast<ULONG>(libc_lock_test_stack_0.size()),
+                                    LIBC_LOCK_TEST_PRIO,
+                                    LIBC_LOCK_TEST_PRIO,
+                                    1,
+                                    TX_AUTO_START));
+    assert_tx_call(tx_thread_create(&libc_lock_test_thread_1,
+                                    libc_lock_test_name_1,
+                                    libc_lock_test_worker,
+                                    1,
+                                    libc_lock_test_stack_1.data(),
+                                    static_cast<ULONG>(libc_lock_test_stack_1.size()),
+                                    LIBC_LOCK_TEST_PRIO,
+                                    LIBC_LOCK_TEST_PRIO,
+                                    1,
+                                    TX_AUTO_START));
 #endif
 
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    AssertTxCall(tx_thread_create(&threadsafe_static_test_thread_0,
-                                  threadsafe_static_test_name_0,
-                                  ThreadsafeStaticTestWorker,
-                                  0,
-                                  threadsafe_static_test_stack_0.data(),
-                                  static_cast<ULONG>(threadsafe_static_test_stack_0.size()),
-                                  THREADSAFE_STATIC_TEST_PRIO,
-                                  THREADSAFE_STATIC_TEST_PRIO,
-                                  1,
-                                  TX_AUTO_START));
-    AssertTxCall(tx_thread_create(&threadsafe_static_test_thread_1,
-                                  threadsafe_static_test_name_1,
-                                  ThreadsafeStaticTestWorker,
-                                  1,
-                                  threadsafe_static_test_stack_1.data(),
-                                  static_cast<ULONG>(threadsafe_static_test_stack_1.size()),
-                                  THREADSAFE_STATIC_TEST_PRIO,
-                                  THREADSAFE_STATIC_TEST_PRIO,
-                                  1,
-                                  TX_AUTO_START));
+    assert_tx_call(tx_thread_create(&threadsafe_static_test_thread_0,
+                                    threadsafe_static_test_name_0,
+                                    threadsafe_static_test_worker,
+                                    0,
+                                    threadsafe_static_test_stack_0.data(),
+                                    static_cast<ULONG>(threadsafe_static_test_stack_0.size()),
+                                    THREADSAFE_STATIC_TEST_PRIO,
+                                    THREADSAFE_STATIC_TEST_PRIO,
+                                    1,
+                                    TX_AUTO_START));
+    assert_tx_call(tx_thread_create(&threadsafe_static_test_thread_1,
+                                    threadsafe_static_test_name_1,
+                                    threadsafe_static_test_worker,
+                                    1,
+                                    threadsafe_static_test_stack_1.data(),
+                                    static_cast<ULONG>(threadsafe_static_test_stack_1.size()),
+                                    THREADSAFE_STATIC_TEST_PRIO,
+                                    THREADSAFE_STATIC_TEST_PRIO,
+                                    1,
+                                    TX_AUTO_START));
 #endif
 }
 

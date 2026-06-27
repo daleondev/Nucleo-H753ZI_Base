@@ -14,13 +14,13 @@ namespace
 
     std::array<LedState, LEDn> led_states{ { { "green", false }, { "red", false } } };
 
-    void PrintMessage(const char* message)
+    void print_message(const char* message)
     {
         std::printf("[sim][hal] %s\n", message);
         std::fflush(stdout);
     }
 
-    bool IsValidLed(Led_TypeDef led) { return led >= LED_GREEN && led < LEDn; }
+    bool is_valid_led(Led_TypeDef led) { return led >= LED_GREEN && led < LEDn; }
 }
 
 extern "C" {
@@ -30,35 +30,35 @@ COM_InitTypeDef BspCOMInit{};
 
 HAL_StatusTypeDef HAL_Init(void)
 {
-    PrintMessage("HAL_Init");
+    print_message("HAL_Init");
     return HAL_OK;
 }
 
-void SystemClock_Config(void) { PrintMessage("SystemClock_Config"); }
+void SystemClock_Config(void) { print_message("SystemClock_Config"); }
 
-void MPU_Config_User(void) { PrintMessage("MPU_Config_User"); }
+void MPU_Config_User(void) { print_message("MPU_Config_User"); }
 
-void SCB_EnableICache(void) { PrintMessage("SCB_EnableICache"); }
+void SCB_EnableICache(void) { print_message("SCB_EnableICache"); }
 
-void SCB_EnableDCache(void) { PrintMessage("SCB_EnableDCache"); }
+void SCB_EnableDCache(void) { print_message("SCB_EnableDCache"); }
 
-void MX_GPIO_Init(void) { PrintMessage("MX_GPIO_Init"); }
+void MX_GPIO_Init(void) { print_message("MX_GPIO_Init"); }
 
-void MX_ETH_Init(void) { PrintMessage("MX_ETH_Init"); }
+void MX_ETH_Init(void) { print_message("MX_ETH_Init"); }
 
-void MX_RTC_Init(void) { PrintMessage("MX_RTC_Init"); }
+void MX_RTC_Init(void) { print_message("MX_RTC_Init"); }
 
-void MX_TIM2_Init(void) { PrintMessage("MX_TIM2_Init"); }
+void MX_TIM2_Init(void) { print_message("MX_TIM2_Init"); }
 
-void MX_RNG_Init(void) { PrintMessage("MX_RNG_Init"); }
+void MX_RNG_Init(void) { print_message("MX_RNG_Init"); }
 
-void MX_FDCAN1_Init(void) { PrintMessage("MX_FDCAN1_Init"); }
+void MX_FDCAN1_Init(void) { print_message("MX_FDCAN1_Init"); }
 
-HAL_StatusTypeDef Platform_InitLibcLocks(void) { return HAL_OK; }
+HAL_StatusTypeDef platform_init_libc_locks(void) { return HAL_OK; }
 
 int32_t BSP_LED_Init(Led_TypeDef led)
 {
-    if (!IsValidLed(led)) {
+    if (!is_valid_led(led)) {
         return BSP_ERROR_UNKNOWN;
     }
 
@@ -70,7 +70,7 @@ int32_t BSP_LED_Init(Led_TypeDef led)
 
 int32_t BSP_LED_Toggle(Led_TypeDef led)
 {
-    if (!IsValidLed(led)) {
+    if (!is_valid_led(led)) {
         return BSP_ERROR_UNKNOWN;
     }
 
@@ -104,7 +104,7 @@ int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init)
 HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef* timer_handle)
 {
     static_cast<void>(timer_handle);
-    PrintMessage("HAL_TIM_Base_Start");
+    print_message("HAL_TIM_Base_Start");
     return HAL_OK;
 }
 

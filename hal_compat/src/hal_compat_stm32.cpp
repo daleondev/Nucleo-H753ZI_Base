@@ -32,18 +32,18 @@ namespace
     CHAR cxx_guard_mutex_name[] = "C++ static init";
     bool cxx_guard_mutex_ready{};
 
-    [[noreturn]] void LibcLockFailure()
+    [[noreturn]] void libc_lock_failure()
     {
         Error_Handler();
         while (true) {
         }
     }
 
-    bool IsThreadContext()
+    bool is_thread_context()
     {
         if (__get_IPSR() != 0U) {
             /* Newlib calls may block and are forbidden from interrupt context. */
-            LibcLockFailure();
+            libc_lock_failure();
         }
 
         const auto* current_thread = tx_thread_identify();
@@ -54,41 +54,41 @@ namespace
         }
 
         if (!libc_mutex_ready) {
-            LibcLockFailure();
+            libc_lock_failure();
         }
 
         return true;
     }
 
-    void AcquireLibcLock(ULONG wait_option)
+    void acquire_libc_lock(ULONG wait_option)
     {
-        if (IsThreadContext() && tx_mutex_get(&libc_mutex, wait_option) != TX_SUCCESS) {
-            LibcLockFailure();
+        if (is_thread_context() && tx_mutex_get(&libc_mutex, wait_option) != TX_SUCCESS) {
+            libc_lock_failure();
         }
     }
 
-    int TryAcquireLibcLock()
+    int try_acquire_libc_lock()
     {
-        if (!IsThreadContext()) {
+        if (!is_thread_context()) {
             return 1;
         }
 
         return tx_mutex_get(&libc_mutex, TX_NO_WAIT) == TX_SUCCESS ? 1 : 0;
     }
 
-    void ReleaseLibcLock()
+    void release_libc_lock()
     {
-        if (IsThreadContext() && tx_mutex_put(&libc_mutex) != TX_SUCCESS) {
-            LibcLockFailure();
+        if (is_thread_context() && tx_mutex_put(&libc_mutex) != TX_SUCCESS) {
+            libc_lock_failure();
         }
     }
 
-    bool IsCxxGuardThreadContext()
+    bool is_cxx_guard_thread_context()
     {
         if (__get_IPSR() != 0U) {
             /* Function-local static initialization may block and is forbidden
              * from interrupt context. */
-            LibcLockFailure();
+            libc_lock_failure();
         }
 
         if (tx_thread_identify() == TX_NULL) {
@@ -97,18 +97,18 @@ namespace
         }
 
         if (!cxx_guard_mutex_ready) {
-            LibcLockFailure();
+            libc_lock_failure();
         }
 
         return true;
     }
 
-    CxxGuard LoadCxxGuard(const CxxGuard* guard)
+    CxxGuard load_cxx_guard(const CxxGuard* guard)
     {
         return __atomic_load_n(guard, __ATOMIC_ACQUIRE);
     }
 
-    void StoreCxxGuard(CxxGuard* guard, CxxGuard value)
+    void store_cxx_guard(CxxGuard* guard, CxxGuard value)
     {
         __atomic_store_n(guard, value, __ATOMIC_RELEASE);
     }
@@ -128,7 +128,7 @@ __lock __lock___malloc_recursive_mutex{};
 __lock __lock___sfp_recursive_mutex{};
 __lock __lock___tz_mutex{};
 
-HAL_StatusTypeDef Platform_InitLibcLocks(void)
+HAL_StatusTypeDef platform_init_libc_locks(void)
 {
     if (libc_mutex_ready) {
         return HAL_OK;
@@ -156,57 +156,57 @@ HAL_StatusTypeDef Platform_InitLibcLocks(void)
 int __cxa_guard_acquire(CxxGuard* guard)
 {
     if (guard == nullptr) {
-        LibcLockFailure();
+        libc_lock_failure();
     }
 
-    if ((LoadCxxGuard(guard) & CXX_GUARD_INITIALIZED) != 0U) {
+    if ((load_cxx_guard(guard) & CXX_GUARD_INITIALIZED) != 0U) {
         return 0;
     }
 
-    const bool thread_context = IsCxxGuardThreadContext();
+    const bool thread_context = is_cxx_guard_thread_context();
     if (thread_context && tx_mutex_get(&cxx_guard_mutex, TX_WAIT_FOREVER) != TX_SUCCESS) {
-        LibcLockFailure();
+        libc_lock_failure();
     }
 
-    const CxxGuard state = LoadCxxGuard(guard);
+    const CxxGuard state = load_cxx_guard(guard);
     if ((state & CXX_GUARD_INITIALIZED) != 0U) {
         if (thread_context && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
-            LibcLockFailure();
+            libc_lock_failure();
         }
         return 0;
     }
 
     if ((state & CXX_GUARD_IN_PROGRESS) != 0U) {
-        LibcLockFailure();
+        libc_lock_failure();
     }
 
-    StoreCxxGuard(guard, state | CXX_GUARD_IN_PROGRESS);
+    store_cxx_guard(guard, state | CXX_GUARD_IN_PROGRESS);
     return 1;
 }
 
 void __cxa_guard_release(CxxGuard* guard)
 {
     if (guard == nullptr) {
-        LibcLockFailure();
+        libc_lock_failure();
     }
 
-    StoreCxxGuard(guard, CXX_GUARD_INITIALIZED);
+    store_cxx_guard(guard, CXX_GUARD_INITIALIZED);
 
-    if (IsCxxGuardThreadContext() && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
-        LibcLockFailure();
+    if (is_cxx_guard_thread_context() && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
+        libc_lock_failure();
     }
 }
 
 void __cxa_guard_abort(CxxGuard* guard)
 {
     if (guard == nullptr) {
-        LibcLockFailure();
+        libc_lock_failure();
     }
 
-    StoreCxxGuard(guard, 0U);
+    store_cxx_guard(guard, 0U);
 
-    if (IsCxxGuardThreadContext() && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
-        LibcLockFailure();
+    if (is_cxx_guard_thread_context() && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
+        libc_lock_failure();
     }
 }
 
@@ -226,7 +226,7 @@ void __retarget_lock_close_recursive(_LOCK_T lock) { __retarget_lock_close(lock)
 void __retarget_lock_acquire(_LOCK_T lock)
 {
     static_cast<void>(lock);
-    AcquireLibcLock(TX_WAIT_FOREVER);
+    acquire_libc_lock(TX_WAIT_FOREVER);
 }
 
 void __retarget_lock_acquire_recursive(_LOCK_T lock) { __retarget_lock_acquire(lock); }
@@ -234,7 +234,7 @@ void __retarget_lock_acquire_recursive(_LOCK_T lock) { __retarget_lock_acquire(l
 int __retarget_lock_try_acquire(_LOCK_T lock)
 {
     static_cast<void>(lock);
-    return TryAcquireLibcLock();
+    return try_acquire_libc_lock();
 }
 
 int __retarget_lock_try_acquire_recursive(_LOCK_T lock) { return __retarget_lock_try_acquire(lock); }
@@ -242,7 +242,7 @@ int __retarget_lock_try_acquire_recursive(_LOCK_T lock) { return __retarget_lock
 void __retarget_lock_release(_LOCK_T lock)
 {
     static_cast<void>(lock);
-    ReleaseLibcLock();
+    release_libc_lock();
 }
 
 void __retarget_lock_release_recursive(_LOCK_T lock) { __retarget_lock_release(lock); }
