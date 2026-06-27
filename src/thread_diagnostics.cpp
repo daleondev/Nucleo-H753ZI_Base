@@ -64,7 +64,7 @@ namespace thread_diagnostics
         {
             auto* first_thread{ _tx_thread_created_ptr };
             if (first_thread == TX_NULL || _tx_thread_created_count == 0U) {
-                std::printf("No threads created\n");
+                std::printf("No threads created\r\n");
                 return {};
             }
 
