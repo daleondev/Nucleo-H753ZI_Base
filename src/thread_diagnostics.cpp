@@ -56,9 +56,9 @@ namespace thread_diagnostics
         constexpr std::string_view USAGE_HEADER{ "Usage [%]" };
         constexpr std::string_view BAR_HEADER{ "Stack-Usage Bar" };
         constexpr std::string_view NEWLINE{ "\r\n" };
-        constexpr BorderStyle TOP_BORDER{ "┌", "┬", "┐" };
-        constexpr BorderStyle MIDDLE_BORDER{ "├", "┼", "┤" };
-        constexpr BorderStyle BOTTOM_BORDER{ "└", "┴", "┘" };
+        constexpr BorderStyle TOP_BORDER{ .left = "┌", .separator = "┬", .right = "┐" };
+        constexpr BorderStyle MIDDLE_BORDER{ .left = "├", .separator = "┼", .right = "┤" };
+        constexpr BorderStyle BOTTOM_BORDER{ .left = "└", .separator = "┴", .right = "┘" };
 
         void refresh_thread_stack_info(TX_THREAD* thread)
         {

@@ -17,7 +17,8 @@ namespace
 
     auto led_states() -> std::array<LedState, LEDn>&
     {
-        static std::array states{ LedState{ "green", false }, LedState{ "red", false } };
+        static std::array states{ LedState{ .name = "green", .is_on = false },
+                                  LedState{ .name = "red", .is_on = false } };
         return states;
     }
 

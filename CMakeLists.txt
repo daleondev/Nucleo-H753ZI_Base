@@ -84,8 +84,9 @@ endif()
 add_subdirectory(src)
 
 if(ENABLE_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
+    # LLVM 18 cannot parse GCC 15's C++26 <format> implementation.
+    find_program(CLANG_TIDY_20_EXECUTABLE NAMES clang-tidy-20 REQUIRED)
     set_target_properties(${PROJECT_NAME} hal osal PROPERTIES
-        CXX_CLANG_TIDY "${CLANG_TIDY_EXECUTABLE}"
+        CXX_CLANG_TIDY "${CLANG_TIDY_20_EXECUTABLE}"
     )
 endif()

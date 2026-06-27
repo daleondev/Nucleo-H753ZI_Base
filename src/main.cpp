@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
 
 namespace
 {
@@ -130,7 +131,7 @@ namespace
                                              static_cast<unsigned long>(worker_id),
                                              static_cast<unsigned long>(iteration)) };
 
-            if (written < 0 || static_cast<std::size_t>(written) >= buffer_size || buffer[written] != '\0' ||
+            if (written < 0 || std::cmp_greater_equal(written, buffer_size) || buffer[written] != '\0' ||
                 std::fflush(stdout) != 0) {
                 Error_Handler();
             }

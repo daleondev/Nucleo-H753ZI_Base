@@ -44,10 +44,12 @@ CheckOptions:
 
   - key: readability-identifier-naming.ClassCase
     value: CamelCase
+  # clang-tidy has no StaticClassMember category. The access-specific rules
+  # below handle instance members, leaving ClassMember as the static fallback.
   - key: readability-identifier-naming.ClassMemberCase
-    value: CamelCase
+    value: camelBack
   - key: readability-identifier-naming.ClassMemberPrefix
-    value: ""
+    value: s_
   - key: readability-identifier-naming.ProtectedMemberCase
     value: camelBack
   - key: readability-identifier-naming.ProtectedMemberPrefix
@@ -56,10 +58,6 @@ CheckOptions:
     value: camelBack
   - key: readability-identifier-naming.PrivateMemberPrefix
     value: m_
-  - key: readability-identifier-naming.StaticClassMemberCase
-    value: camelBack
-  - key: readability-identifier-naming.StaticClassMemberPrefix
-    value: s_
   - key: readability-identifier-naming.ClassConstantCase
     value: UPPER_CASE
   - key: readability-identifier-naming.ClassConstantPrefix

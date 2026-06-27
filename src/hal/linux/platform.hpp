@@ -25,7 +25,7 @@ extern TIM_HandleTypeDef htim2;
 typedef enum
 {
     LED_GREEN = 0,
-    LED_RED = 1,
+    LED_RED,
     LEDn,
 } Led_TypeDef;
 
