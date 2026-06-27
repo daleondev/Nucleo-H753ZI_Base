@@ -57,7 +57,10 @@ MEMORY
 {
 DTCMRAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
 RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
-RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 288K
+RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 128K
+ETH_BUFFER_RAM (xrw)      : ORIGIN = 0x30020000, LENGTH = 128K
+ETH_DESCRIPTOR_RAM (xrw)      : ORIGIN = 0x30040000, LENGTH = 512
+RAM_D2_SRAM3 (xrw)      : ORIGIN = 0x30040200, LENGTH = 0x7E00
 RAM_D3 (xrw)      : ORIGIN = 0x38000000, LENGTH = 64K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
 FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 2048K
@@ -240,6 +243,38 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >DTCMRAM
+
+  /* Normal, shareable, non-cacheable SRAM2 for raw Ethernet frame buffers. */
+  .EthBufferSection (NOLOAD) :
+  {
+    . = ALIGN(32);
+    __eth_buffer_start__ = .;
+    KEEP(*(.EthBufferSection))
+    . = ALIGN(32);
+    __eth_buffer_end__ = .;
+  } >ETH_BUFFER_RAM
+
+  /* Shared Device memory: Ethernet DMA descriptor tables only. */
+  .RxDescripSection 0x30040000 (NOLOAD) :
+  {
+    . = ALIGN(32);
+    KEEP(*(.RxDescripSection))
+    . = ALIGN(32);
+  } >ETH_DESCRIPTOR_RAM
+
+  .TxDescripSection 0x30040100 (NOLOAD) :
+  {
+    . = ALIGN(32);
+    KEEP(*(.TxDescripSection))
+    . = ALIGN(32);
+  } >ETH_DESCRIPTOR_RAM
+
+  ASSERT(SIZEOF(.RxDescripSection) <= 0x100,
+         "Ethernet RX descriptors overlap the TX descriptor area")
+  ASSERT(SIZEOF(.TxDescripSection) <= 0x100,
+         "Ethernet TX descriptors exceed descriptor SRAM")
+  ASSERT(SIZEOF(.EthBufferSection) <= LENGTH(ETH_BUFFER_RAM),
+         "Raw Ethernet frame buffers exceed SRAM2")
 
 
 

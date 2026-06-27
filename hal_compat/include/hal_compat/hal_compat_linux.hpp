@@ -72,6 +72,7 @@ void SCB_EnableICache(void);
 void SCB_EnableDCache(void);
 
 void MX_GPIO_Init(void);
+void MX_ETH_Init(void);
 void MX_RTC_Init(void);
 void MX_TIM2_Init(void);
 void MX_RNG_Init(void);

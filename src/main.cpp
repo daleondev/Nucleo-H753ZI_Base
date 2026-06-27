@@ -79,6 +79,7 @@ int main(void)
     SystemClock_Config();
 
     MX_GPIO_Init();
+    MX_ETH_Init();
     MX_RTC_Init();
     MX_TIM2_Init();
     MX_RNG_Init();

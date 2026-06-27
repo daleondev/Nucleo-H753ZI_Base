@@ -4,6 +4,7 @@
 extern "C" {
 #endif
 
+#include "eth.h"
 #include "fdcan.h"
 #include "gpio.h"
 #include "main.h"

@@ -44,6 +44,8 @@ void SCB_EnableDCache(void) { PrintMessage("SCB_EnableDCache"); }
 
 void MX_GPIO_Init(void) { PrintMessage("MX_GPIO_Init"); }
 
+void MX_ETH_Init(void) { PrintMessage("MX_ETH_Init"); }
+
 void MX_RTC_Init(void) { PrintMessage("MX_RTC_Init"); }
 
 void MX_TIM2_Init(void) { PrintMessage("MX_TIM2_Init"); }
