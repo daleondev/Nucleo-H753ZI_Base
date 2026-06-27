@@ -19,6 +19,7 @@ add_subdirectory(hal_compat)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
+    src/thread_diagnostics.cpp
 )
 
 target_include_directories(${PROJECT_NAME}

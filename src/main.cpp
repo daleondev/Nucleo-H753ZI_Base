@@ -1,6 +1,8 @@
 #include "hal_compat/platform_hal.hpp"
+#include "thread_diagnostics.hpp"
 
 #include <tx_api.h>
+#include <tx_thread.h>
 
 #include <array>
 #include <atomic>
@@ -78,7 +80,7 @@ namespace
     void thread_stack_error_handler(TX_THREAD* thread)
     {
         const auto* thread_name = thread != TX_NULL ? thread->tx_thread_name : "Unknown";
-        std::printf("Thread %s stack overflow detected\n", thread_name);
+        std::printf("Thread %s stack overflow detected\r\n", thread_name);
         std::fflush(stdout);
         Error_Handler();
     }
@@ -131,7 +133,8 @@ namespace
             std::free(buffer);
         }
 
-        if (std::printf("[libc-lock-test] worker %lu passed\n", static_cast<unsigned long>(worker_id)) < 0 ||
+        if (std::printf("[libc-lock-test] worker %lu passed\r\n", static_cast<unsigned long>(worker_id)) <
+              0 ||
             std::fflush(stdout) != 0) {
             Error_Handler();
         }
@@ -208,7 +211,7 @@ namespace
             Error_Handler();
         }
 
-        if (std::printf("[threadsafe-static-test] singleton initialized once\n") < 0 ||
+        if (std::printf("[threadsafe-static-test] singleton initialized once\r\n") < 0 ||
             std::fflush(stdout) != 0) {
             Error_Handler();
         }
@@ -219,10 +222,12 @@ namespace
             assert_tx_call(tx_semaphore_get(&libc_lock_test_done, TX_WAIT_FOREVER));
         }
 
-        if (std::printf("[libc-lock-test] all workers passed\n") < 0 || std::fflush(stdout) != 0) {
+        if (std::printf("[libc-lock-test] all workers passed\r\n") < 0 || std::fflush(stdout) != 0) {
             Error_Handler();
         }
 #endif
+
+        thread_diagnostics::printAll();
 
         const auto blink_period_ticks{ milliseconds_to_ticks(BLINK_PERIOD_MS) };
 
@@ -234,7 +239,6 @@ namespace
             tx_thread_sleep(blink_period_ticks);
         }
     }
-
 } // namespace
 
 extern "C" void tx_application_define(void* first_unused_memory)
