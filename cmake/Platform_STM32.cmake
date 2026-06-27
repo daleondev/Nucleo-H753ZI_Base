@@ -42,7 +42,6 @@ add_library(Platform OBJECT
     ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/rng.c
     ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/rtc.c
     ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/tim.c
-    ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/fdcan.c
     ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_it.c
     ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_hal_msp.c
     ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_hal_timebase_tim.c

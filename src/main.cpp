@@ -326,7 +326,6 @@ int main(void)
     MX_RTC_Init();
     MX_TIM2_Init();
     MX_RNG_Init();
-    MX_FDCAN1_Init();
 
     BSP_LED_Init(LED_GREEN);
     BSP_LED_Init(LED_RED);

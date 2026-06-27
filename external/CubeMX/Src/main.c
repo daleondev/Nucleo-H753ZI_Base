@@ -20,7 +20,6 @@
 #include "app_threadx.h"
 #include "main.h"
 #include "eth.h"
-#include "fdcan.h"
 #include "rng.h"
 #include "rtc.h"
 #include "tim.h"
