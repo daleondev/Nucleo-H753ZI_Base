@@ -22,6 +22,8 @@ RUN apt update && apt install -y --no-install-recommends \
 RUN wget -qO- https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi.tar.xz | tar -xJ -C /opt
 ENV PATH="/opt/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:${PATH}"
 
+RUN usermod -aG dialout vscode
+
 WORKDIR /workspace
 
 CMD ["/bin/bash"]
