@@ -30,7 +30,7 @@ namespace osal
 
         template<typename Func, typename... Args>
         Thread(std::string_view name, uint32_t prio, std::span<std::byte> stack, Func&& func, Args&&... args)
-          : m_id{ nextId() }
+          : m_registryId{ nextRegistryId() }
           , m_name{ name }
           , m_prio{ prio }
           , m_stack{ stack }
@@ -40,13 +40,13 @@ namespace osal
         {
             {
                 std::scoped_lock lock(s_registryMutex);
-                s_registry[m_id] = this;
+                s_registry[m_registryId] = this;
             }
 
             auto ret{ tx_thread_create(&m_thread,
                                        const_cast<CHAR*>(m_name.data()),
                                        run,
-                                       m_id,
+                                       m_registryId,
                                        m_stack.data(),
                                        m_stack.size(),
                                        m_prio,
@@ -68,10 +68,10 @@ namespace osal
 
       private:
         static auto run(ULONG id) -> VOID;
-        static auto nextId() -> ULONG;
+        static auto nextRegistryId() -> ULONG;
         static auto nextThreadId() -> std::size_t;
 
-        ULONG m_id;
+        ULONG m_registryId;
         std::string m_name;
         uint32_t m_prio;
         std::span<std::byte> m_stack;

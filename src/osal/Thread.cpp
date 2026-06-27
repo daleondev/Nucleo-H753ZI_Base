@@ -44,7 +44,7 @@ namespace osal
         }
     }
 
-    auto Thread::nextId() -> ULONG
+    auto Thread::nextRegistryId() -> ULONG
     {
         static std::atomic<ULONG> id{};
         return id.fetch_add(1);
