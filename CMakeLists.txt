@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(Application LANGUAGES C CXX ASM)
 
+option(ENABLE_LIBC_LOCK_TEST "Run the two-thread libc lock self-test at startup" ON)
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hal_compat)
 
 add_executable(${PROJECT_NAME})
@@ -66,6 +68,13 @@ target_compile_features(${PROJECT_NAME}
     PRIVATE
         cxx_std_23
 )
+
+if(ENABLE_LIBC_LOCK_TEST)
+    target_compile_definitions(${PROJECT_NAME}
+        PRIVATE
+            ENABLE_LIBC_LOCK_TEST=1
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
