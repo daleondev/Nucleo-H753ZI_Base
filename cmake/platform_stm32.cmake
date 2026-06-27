@@ -2,17 +2,18 @@ set(THREADX_ARCH cortex_m7)
 set(THREADX_TOOLCHAIN gnu)
 set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
+target_link_libraries(threadx PRIVATE project_compiler_settings)
 
 # This setting changes ThreadX-visible structures and must be consistent for
 # the kernel and every consumer of tx_api.h.
 target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING)
 
-add_library(Platform OBJECT)
+add_library(platform OBJECT)
 
 # Startup and ThreadX low-level objects must be present directly in the final
 # link. A static archive is insufficient because their references appear only
 # after GNU ld reaches the ThreadX archive.
-target_sources(Platform
+target_sources(platform
     PRIVATE
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/main.c
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/eth.c
@@ -60,7 +61,7 @@ target_sources(Platform
         ${PROJECT_SOURCE_DIR}/external/stm32h7xx-nucleo-bsp/stm32h7xx_nucleo.c  
 )
 
-target_include_directories(Platform
+target_include_directories(platform
     PUBLIC
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Inc
         ${PROJECT_SOURCE_DIR}/external/stm32h7xx-hal-driver/Inc
@@ -70,7 +71,7 @@ target_include_directories(Platform
         ${PROJECT_SOURCE_DIR}/external/cmsis-device-h7/Include
 )
 
-target_compile_definitions(Platform
+target_compile_definitions(platform
     PUBLIC
         USE_PWR_LDO_SUPPLY
         USE_HAL_DRIVER
@@ -78,12 +79,12 @@ target_compile_definitions(Platform
         $<$<CONFIG:Debug>:DEBUG>
 )
 
-target_link_libraries(Platform
+target_link_libraries(platform
     PUBLIC
         threadx
 )
 
-target_compile_features(Platform
+target_compile_features(platform
     PUBLIC
         c_std_11
 )

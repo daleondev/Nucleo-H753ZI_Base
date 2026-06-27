@@ -2,21 +2,22 @@ set(THREADX_ARCH linux)
 set(THREADX_TOOLCHAIN gnu)
 set(THREADX_CUSTOM_PORT ${CMAKE_SOURCE_DIR}/external/threadx_port/linux/gnu)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
+target_link_libraries(threadx PRIVATE project_compiler_settings)
 
 target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING TX_LINUX_MULTI_CORE)
 
 find_package(Threads REQUIRED)
 
-add_library(Platform INTERFACE)
+add_library(platform INTERFACE)
 
-target_link_libraries(Platform
+target_link_libraries(platform
     INTERFACE
         threadx
         Threads::Threads
         rt
 )
 
-target_compile_definitions(Platform
+target_compile_definitions(platform
     INTERFACE
         $<$<CONFIG:Debug>:DEBUG>
 )

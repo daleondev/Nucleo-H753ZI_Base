@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.22)
 project(Application LANGUAGES C CXX ASM)
 
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
+   CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+    message(FATAL_ERROR "This project requires a GNU C++ compiler with C++26 support (GCC 15+)")
+endif()
+
+add_library(project_compiler_settings INTERFACE)
+target_compile_options(project_compiler_settings
+    INTERFACE
+        $<$<COMPILE_LANGUAGE:CXX>:-std=c++26>
+)
+
 option(ENABLE_LIBC_LOCK_TEST "Run the two-thread libc lock self-test at startup" ON)
 option(ENABLE_THREADSAFE_STATIC_TEST
        "Run the contended function-local static initialization self-test at startup"
@@ -8,9 +19,9 @@ option(ENABLE_THREADSAFE_STATIC_TEST
 option(ENABLE_CLANG_TIDY "Run clang-tidy while compiling project-owned C++ targets" OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    include(cmake/Platform_Linux.cmake)
+    include(cmake/platform_linux.cmake)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
-    include(cmake/Platform_STM32.cmake)
+    include(cmake/platform_stm32.cmake)
 else()
     message(FATAL_ERROR "Unsupported target system: ${CMAKE_SYSTEM_NAME}")
 endif()
@@ -19,29 +30,14 @@ add_executable(${PROJECT_NAME})
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
-        Platform
-)
-
-target_compile_features(${PROJECT_NAME}
-    PRIVATE
-        cxx_std_23
-)
-
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    CXX_EXTENSIONS OFF
+        platform
+        project_compiler_settings
 )
 
 target_compile_options(${PROJECT_NAME}
     PRIVATE
         $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
-
-if(ENABLE_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
-    set_target_properties(${PROJECT_NAME} HalCompat PROPERTIES
-        CXX_CLANG_TIDY "${CLANG_TIDY_EXECUTABLE}"
-    )
-endif()
 
 if(ENABLE_LIBC_LOCK_TEST)
     target_compile_definitions(${PROJECT_NAME}
@@ -86,3 +82,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
 endif()
 
 add_subdirectory(src)
+
+if(ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
+    set_target_properties(${PROJECT_NAME} hal osal PROPERTIES
+        CXX_CLANG_TIDY "${CLANG_TIDY_EXECUTABLE}"
+    )
+endif()

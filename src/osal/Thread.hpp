@@ -17,7 +17,7 @@ namespace osal
     class Thread
     {
       private:
-        std::atomic_size_t s_id{ 0UZ };
+        inline static std::atomic_size_t s_id{ 0UZ };
 
       public:
         template<typename Func, typename... Args>

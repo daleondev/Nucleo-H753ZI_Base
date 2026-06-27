@@ -2,17 +2,8 @@ add_library(hal STATIC)
 
 target_link_libraries(hal
     PUBLIC
-        Platform
-)
-
-target_compile_features(hal
-    PRIVATE
-        cxx_std_23
-)
-
-set_target_properties(hal 
-    PROPERTIES
-        CXX_EXTENSIONS OFF
+        platform
+        project_compiler_settings
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")

@@ -8,18 +8,9 @@ target_sources(osal
 )
 
 target_link_libraries(osal
-    PRIVATE
+    PUBLIC
         threadx
-)
-
-target_compile_features(osal
-    PRIVATE
-        cxx_std_23
-)
-
-set_target_properties(osal 
-    PROPERTIES
-        CXX_EXTENSIONS OFF
+        project_compiler_settings
 )
 
 target_link_libraries(${PROJECT_NAME}
