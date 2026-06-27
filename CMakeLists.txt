@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 project(Application LANGUAGES C CXX ASM)
 
 option(ENABLE_LIBC_LOCK_TEST "Run the two-thread libc lock self-test at startup" ON)
+option(ENABLE_THREADSAFE_STATIC_TEST
+       "Run the contended function-local static initialization self-test at startup"
+       ON)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hal_compat)
 
@@ -73,6 +76,13 @@ if(ENABLE_LIBC_LOCK_TEST)
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE
             ENABLE_LIBC_LOCK_TEST=1
+    )
+endif()
+
+if(ENABLE_THREADSAFE_STATIC_TEST)
+    target_compile_definitions(${PROJECT_NAME}
+        PRIVATE
+            ENABLE_THREADSAFE_STATIC_TEST=1
     )
 endif()
 

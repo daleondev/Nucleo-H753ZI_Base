@@ -181,24 +181,6 @@ void HAL_ETH_MspInit(ETH_HandleTypeDef* ethHandle)
     HAL_NVIC_EnableIRQ(ETH_IRQn);
   /* USER CODE BEGIN ETH_MspInit 1 */
 
-    /* CubeMX 6.17 may regenerate RMII pins at HIGH speed even when the
-       project requests VERY_HIGH. Reapply the intended setting here so it
-       survives subsequent regeneration. */
-    HAL_NVIC_SetPriority(ETH_IRQn, 5, 0);
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-
-    GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_7;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = GPIO_PIN_13;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_13;
-    HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
-
   /* USER CODE END ETH_MspInit 1 */
   }
 }

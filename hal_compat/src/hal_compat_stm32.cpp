@@ -16,10 +16,21 @@ struct __lock
 
 namespace
 {
+    using CxxGuard = std::uint32_t;
+
+    static_assert(sizeof(CxxGuard) == 4U, "Arm EABI requires a 32-bit C++ guard");
+
+    constexpr CxxGuard CXX_GUARD_INITIALIZED{ 1U };
+    constexpr CxxGuard CXX_GUARD_IN_PROGRESS{ 1U << 8U };
+
     TX_MUTEX libc_mutex;
     CHAR libc_mutex_name[] = "Newlib libc";
     bool libc_mutex_ready{};
     __lock dynamic_lock_sentinel{};
+
+    TX_MUTEX cxx_guard_mutex;
+    CHAR cxx_guard_mutex_name[] = "C++ static init";
+    bool cxx_guard_mutex_ready{};
 
     [[noreturn]] void LibcLockFailure()
     {
@@ -71,6 +82,36 @@ namespace
             LibcLockFailure();
         }
     }
+
+    bool IsCxxGuardThreadContext()
+    {
+        if (__get_IPSR() != 0U) {
+            /* Function-local static initialization may block and is forbidden
+             * from interrupt context. */
+            LibcLockFailure();
+        }
+
+        if (tx_thread_identify() == TX_NULL) {
+            /* Before the scheduler starts, execution is single-threaded. */
+            return false;
+        }
+
+        if (!cxx_guard_mutex_ready) {
+            LibcLockFailure();
+        }
+
+        return true;
+    }
+
+    CxxGuard LoadCxxGuard(const CxxGuard* guard)
+    {
+        return __atomic_load_n(guard, __ATOMIC_ACQUIRE);
+    }
+
+    void StoreCxxGuard(CxxGuard* guard, CxxGuard value)
+    {
+        __atomic_store_n(guard, value, __ATOMIC_RELEASE);
+    }
 }
 
 extern "C" {
@@ -97,8 +138,76 @@ HAL_StatusTypeDef Platform_InitLibcLocks(void)
         return HAL_ERROR;
     }
 
+    if (tx_mutex_create(&cxx_guard_mutex, cxx_guard_mutex_name, TX_INHERIT) != TX_SUCCESS) {
+        return HAL_ERROR;
+    }
+
     libc_mutex_ready = true;
+    cxx_guard_mutex_ready = true;
     return HAL_OK;
+}
+
+/* Arm GNU libstdc++ is configured with the "single" thread model, so its
+ * stock guard functions do not wait for another ThreadX thread to finish a
+ * function-local static initializer. Hold one recursive mutex across the
+ * initializer and use each ABI guard's second byte to detect true recursion.
+ * Nested initialization of a different static remains valid because ThreadX
+ * mutexes are recursive. */
+int __cxa_guard_acquire(CxxGuard* guard)
+{
+    if (guard == nullptr) {
+        LibcLockFailure();
+    }
+
+    if ((LoadCxxGuard(guard) & CXX_GUARD_INITIALIZED) != 0U) {
+        return 0;
+    }
+
+    const bool thread_context = IsCxxGuardThreadContext();
+    if (thread_context && tx_mutex_get(&cxx_guard_mutex, TX_WAIT_FOREVER) != TX_SUCCESS) {
+        LibcLockFailure();
+    }
+
+    const CxxGuard state = LoadCxxGuard(guard);
+    if ((state & CXX_GUARD_INITIALIZED) != 0U) {
+        if (thread_context && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
+            LibcLockFailure();
+        }
+        return 0;
+    }
+
+    if ((state & CXX_GUARD_IN_PROGRESS) != 0U) {
+        LibcLockFailure();
+    }
+
+    StoreCxxGuard(guard, state | CXX_GUARD_IN_PROGRESS);
+    return 1;
+}
+
+void __cxa_guard_release(CxxGuard* guard)
+{
+    if (guard == nullptr) {
+        LibcLockFailure();
+    }
+
+    StoreCxxGuard(guard, CXX_GUARD_INITIALIZED);
+
+    if (IsCxxGuardThreadContext() && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
+        LibcLockFailure();
+    }
+}
+
+void __cxa_guard_abort(CxxGuard* guard)
+{
+    if (guard == nullptr) {
+        LibcLockFailure();
+    }
+
+    StoreCxxGuard(guard, 0U);
+
+    if (IsCxxGuardThreadContext() && tx_mutex_put(&cxx_guard_mutex) != TX_SUCCESS) {
+        LibcLockFailure();
+    }
 }
 
 void __retarget_lock_init(_LOCK_T* lock)

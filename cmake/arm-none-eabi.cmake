@@ -33,7 +33,7 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -g0")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g3")
 set(CMAKE_CXX_FLAGS_RELEASE "-Os -g0")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -frtti -fexceptions -fno-threadsafe-statics")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -frtti -fexceptions")
 
 set(CMAKE_EXE_LINKER_FLAGS "${TARGET_FLAGS}")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -T \"${CMAKE_SOURCE_DIR}/external/CubeMX/STM32H753XX_FLASH.ld\"")
