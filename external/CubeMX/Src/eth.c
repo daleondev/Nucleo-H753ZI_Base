@@ -105,8 +105,8 @@ void MX_ETH_Init(void)
   }
 
   memset(&TxConfig, 0 , sizeof(ETH_TxPacketConfig));
-  TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_SAIC | ETH_TX_PACKETS_FEATURES_CRCPAD;
-  TxConfig.SrcAddrCtrl = ETH_SRC_ADDR_REPLACE;
+  TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM | ETH_TX_PACKETS_FEATURES_CRCPAD;
+  TxConfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
   TxConfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
   /* USER CODE BEGIN ETH_Init 2 */
 
@@ -177,7 +177,7 @@ void HAL_ETH_MspInit(ETH_HandleTypeDef* ethHandle)
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
     /* ETH interrupt Init */
-    HAL_NVIC_SetPriority(ETH_IRQn, 5, 0);
+    HAL_NVIC_SetPriority(ETH_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(ETH_IRQn);
   /* USER CODE BEGIN ETH_MspInit 1 */
 

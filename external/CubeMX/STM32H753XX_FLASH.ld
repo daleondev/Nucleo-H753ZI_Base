@@ -69,10 +69,12 @@ FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 2048K
 
 /* Keep the Cortex-M7 main/interrupt stack in deterministic, tightly coupled DTCM.
  * General application data and the C/C++ heap live in the larger AXI SRAM. */
-_Min_Heap_Size = 0x200;  /* minimum reserved C/C++ heap space */
-_Min_Stack_Size = LENGTH(DTCM_STACK);
+_Min_Heap_Size = 0x200;      /* required amount of heap  */
+_Min_Stack_Size = 0x1000; /* required amount of stack */
 _estack = ORIGIN(DTCM_STACK) + LENGTH(DTCM_STACK);
 _sstack = ORIGIN(DTCM_STACK);
+
+ASSERT(LENGTH(DTCM_STACK) >= _Min_Stack_Size, "Stack too small")
 
 /* Define output sections */
 SECTIONS
