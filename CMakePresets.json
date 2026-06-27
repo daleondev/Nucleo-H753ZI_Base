@@ -12,17 +12,14 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_MAKE_PROGRAM": "ninja",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true
             }
         },
         {
             "name": "base-stm32",
             "hidden": true,
             "inherits": "base",
-            "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake"
-            }
+            "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake"
         },
         {
             "name": "base-linux",
