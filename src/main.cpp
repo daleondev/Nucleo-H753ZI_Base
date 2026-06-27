@@ -55,6 +55,10 @@ extern "C" void tx_application_define(void* first_unused_memory)
 {
     static_cast<void>(first_unused_memory);
 
+    if (Platform_InitLibcLocks() != HAL_OK) {
+        Error_Handler();
+    }
+
     AssertTxCall(tx_thread_stack_error_notify(ThreadStackErrorHandler));
     AssertTxCall(tx_thread_create(&main_thread,
                                   main_thread_name,

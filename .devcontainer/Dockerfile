@@ -12,6 +12,7 @@ RUN apt update && apt install -y --no-install-recommends \
     ninja-build \
     gcc-15 \
     g++-15 \
+    gdb \
     openocd \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 100 \

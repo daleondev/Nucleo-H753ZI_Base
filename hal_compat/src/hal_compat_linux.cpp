@@ -54,6 +54,8 @@ void MX_RNG_Init(void) { PrintMessage("MX_RNG_Init"); }
 
 void MX_FDCAN1_Init(void) { PrintMessage("MX_FDCAN1_Init"); }
 
+HAL_StatusTypeDef Platform_InitLibcLocks(void) { return HAL_OK; }
+
 int32_t BSP_LED_Init(Led_TypeDef led)
 {
     if (!IsValidLed(led)) {

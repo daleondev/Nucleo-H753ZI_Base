@@ -11,7 +11,7 @@
             "device": "STM32H753ZI",
             "servertype": "openocd",
             "serverpath": "/usr/bin/openocd",
-            "gdbPath": "/usr/bin/arm-none-eabi-gdb",
+            "gdbPath": "arm-none-eabi-gdb",
             "configFiles": [
                 "interface/stlink.cfg",
                 "target/stm32h7x.cfg"
@@ -35,7 +35,7 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
-            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerPath": "gdb",
             "preLaunchTask": "Build Debug Linux",
             "setupCommands": [
                 {
