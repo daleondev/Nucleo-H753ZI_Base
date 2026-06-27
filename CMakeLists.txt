@@ -1,13 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(Application LANGUAGES C CXX ASM)
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS ON)
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 option(ENABLE_LIBC_LOCK_TEST "Run the two-thread libc lock self-test at startup" ON)
 option(ENABLE_THREADSAFE_STATIC_TEST
        "Run the contended function-local static initialization self-test at startup"
@@ -16,9 +9,6 @@ option(ENABLE_THREADSAFE_STATIC_TEST
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(cmake/Platform_Linux.cmake)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
-    set(TX_USER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
-    set(STM32_LINKER_SCRIPT
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/STM32H753XX_FLASH.ld)
     include(cmake/Platform_STM32.cmake)
 else()
     message(FATAL_ERROR "Unsupported target system: ${CMAKE_SYSTEM_NAME}")
@@ -39,6 +29,15 @@ target_link_libraries(${PROJECT_NAME}
     PRIVATE
         HalCompat
         Platform
+)
+
+target_compile_features(${PROJECT_NAME}
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CXX_EXTENSIONS OFF
 )
 
 target_compile_options(${PROJECT_NAME}
@@ -62,11 +61,13 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY
-        LINK_DEPENDS ${STM32_LINKER_SCRIPT})
+        LINK_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/STM32H753XX_FLASH.ld
+    )
 
     target_link_options(${PROJECT_NAME}
         PRIVATE
-            -T${STM32_LINKER_SCRIPT}
+            -T${CMAKE_CURRENT_SOURCE_DIR}/external/CubeMX/STM32H753XX_FLASH.ld
             --specs=nosys.specs
             -Wl,-Map=$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.map
             -Wl,--gc-sections

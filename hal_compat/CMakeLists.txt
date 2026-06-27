@@ -1,25 +1,29 @@
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
-    set(HAL_COMPAT_SOURCE src/hal_compat_stm32.cpp)
-    set(HAL_COMPAT_DEFINITION HAL_COMPAT_STM32)
+    add_library(HalCompat STATIC
+        src/hal_compat_stm32.cpp
+    )
+    target_compile_definitions(HalCompat PUBLIC HAL_COMPAT_STM32)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(HAL_COMPAT_SOURCE src/hal_compat_linux.cpp)
-    set(HAL_COMPAT_DEFINITION HAL_COMPAT_LINUX)
+    add_library(HalCompat STATIC
+        src/hal_compat_linux.cpp
+    )
+    target_compile_definitions(HalCompat PUBLIC HAL_COMPAT_LINUX)
 else()
     message(FATAL_ERROR "Unsupported HAL compatibility platform: ${CMAKE_SYSTEM_NAME}")
 endif()
-
-add_library(HalCompat STATIC
-    ${HAL_COMPAT_SOURCE}
-)
 
 target_include_directories(HalCompat
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_compile_definitions(HalCompat
-    PUBLIC
-        ${HAL_COMPAT_DEFINITION}
+target_compile_features(HalCompat
+    PRIVATE
+        cxx_std_23
+)
+
+set_target_properties(HalCompat PROPERTIES
+    CXX_EXTENSIONS OFF
 )
 
 target_compile_options(HalCompat

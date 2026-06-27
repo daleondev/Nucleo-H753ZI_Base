@@ -1,5 +1,6 @@
 set(THREADX_ARCH cortex_m7)
 set(THREADX_TOOLCHAIN gnu)
+set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/external/CubeMX/Inc/tx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
 
 # This setting changes ThreadX-visible structures and must be consistent for
@@ -80,6 +81,11 @@ add_library(Platform OBJECT
     ${PROJECT_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_uart.c
     ${PROJECT_SOURCE_DIR}/external/stm32h7xx-hal-driver/Src/stm32h7xx_hal_uart_ex.c
     ${PROJECT_SOURCE_DIR}/external/stm32h7xx-nucleo-bsp/stm32h7xx_nucleo.c
+)
+
+target_compile_features(Platform
+    PUBLIC
+        c_std_11
 )
 
 target_link_libraries(Platform
