@@ -1,12 +1,16 @@
 add_library(osal STATIC)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
-    add_subdirectory(stm32)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_subdirectory(linux)
-else()
-    message(FATAL_ERROR "Unsupported OSAL platform: ${CMAKE_SYSTEM_NAME}")
-endif()
+target_sources(osal
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Mutex.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Semaphore.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Thread.cpp
+)
+
+target_link_libraries(osal
+    PRIVATE
+        threadx
+)
 
 target_compile_features(osal
     PRIVATE

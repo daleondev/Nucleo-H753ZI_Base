@@ -10,3 +10,4 @@ target_include_directories(${PROJECT_NAME}
 )
 
 add_subdirectory(hal)
+add_subdirectory(osal)

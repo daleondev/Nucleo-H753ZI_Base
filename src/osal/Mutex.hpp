@@ -1,20 +1,31 @@
 #pragma once
 
-#include <concepts>
+#include <tx_api.h>
 
-#ifdef __linux__
-#include "linux/Mutex.hpp"
-#else
-#include "stm32/Mutex.hpp"
-#endif
+#include <string>
+#include <string_view>
 
 namespace osal
 {
-    template<typename T>
-    concept IsMutex = !std::copyable<T> && !std::movable<T> && requires(T t) {
-        { t.lock() };
-        { t.unlock() };
-    };
+    class Mutex
+    {
+      public:
+        Mutex();
+        Mutex(std::string_view name);
+        ~Mutex();
 
-    static_assert(IsMutex<Mutex>);
+        Mutex(const Mutex&) = delete;
+        auto operator=(const Mutex&) -> Mutex& = delete;
+
+        Mutex(Mutex&&) = delete;
+        auto operator=(Mutex&&) -> Mutex& = delete;
+
+        auto unlock() -> void;
+        auto lock() -> void;
+        auto tryLock() -> bool;
+
+      private:
+        std::string m_name;
+        TX_MUTEX m_mutex;
+    };
 }
