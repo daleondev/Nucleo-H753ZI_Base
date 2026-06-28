@@ -5,10 +5,13 @@ target_sources(runtime_libstdcxx
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/atomic.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/backend.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/clock.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/condition_variable.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cxx_guard.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/future.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/libstdcxx.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/once.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/sleep.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/thread.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/thread_exit.cpp
 )
 
