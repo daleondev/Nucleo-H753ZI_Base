@@ -1,6 +1,7 @@
 add_library(osal STATIC)
 
 add_subdirectory(libc)
+add_subdirectory(libstdcxx)
 
 target_sources(osal
     PRIVATE
@@ -12,6 +13,7 @@ target_sources(osal
 target_link_libraries(osal
     PUBLIC
         osal::libc
+        osal::libstdcxx
         project_compiler_settings
 )
 
