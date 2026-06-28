@@ -1,4 +1,16 @@
 #include "libc.h"
+
+#ifdef __linux__
+
+void osal_newlib_initialize(void)
+{
+    /* The ThreadX Linux port represents every simulated ThreadX thread with a
+     * pthread. glibc therefore supplies both internal locking and per-pthread
+     * libc state without Newlib's retargeting hooks. */
+}
+
+#else // stm32
+
 #include "hal/hal.hpp"
 
 #include <sys/lock.h>
@@ -233,24 +245,15 @@ void __retarget_lock_close(_LOCK_T lock)
 
 void __retarget_lock_close_recursive(_LOCK_T lock) { __retarget_lock_close(lock); }
 
-void __retarget_lock_acquire(_LOCK_T lock)
-{
-    acquire_libc_lock(lock, TX_WAIT_FOREVER);
-}
+void __retarget_lock_acquire(_LOCK_T lock) { acquire_libc_lock(lock, TX_WAIT_FOREVER); }
 
 void __retarget_lock_acquire_recursive(_LOCK_T lock) { __retarget_lock_acquire(lock); }
 
-int __retarget_lock_try_acquire(_LOCK_T lock)
-{
-    return try_acquire_libc_lock(lock);
-}
+int __retarget_lock_try_acquire(_LOCK_T lock) { return try_acquire_libc_lock(lock); }
 
 int __retarget_lock_try_acquire_recursive(_LOCK_T lock) { return __retarget_lock_try_acquire(lock); }
 
-void __retarget_lock_release(_LOCK_T lock)
-{
-    release_libc_lock(lock);
-}
+void __retarget_lock_release(_LOCK_T lock) { release_libc_lock(lock); }
 
 void __retarget_lock_release_recursive(_LOCK_T lock) { __retarget_lock_release(lock); }
 
@@ -292,3 +295,5 @@ void _tx_execution_thread_exit(void) { _impure_ptr = &_impure_data; }
 void _tx_execution_isr_enter(void) {}
 
 void _tx_execution_isr_exit(void) {}
+
+#endif
