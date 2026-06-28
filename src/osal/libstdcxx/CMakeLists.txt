@@ -4,6 +4,7 @@ add_library(osal::libstdcxx ALIAS osal_libstdcxx)
 target_sources(osal_libstdcxx
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/backend.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/cxx_guard.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libstdcxx.cpp
 )
 
@@ -29,10 +30,10 @@ target_compile_definitions(osal_libstdcxx
         _GLIBCXX_USE_SCHED_YIELD=1
 )
 
-# The ThreadX startup extension is the only direct reference to this runtime
-# hook. Keep its archive member even when the application does not use a
-# libstdc++ synchronization type directly.
+# Keep the automatic runtime hook and the replacement guard ABI in the final
+# link even when no ordinary C++ reference pulls their archive members first.
 target_link_options(osal_libstdcxx
     INTERFACE
+        LINKER:--undefined=__cxa_guard_acquire
         LINKER:--undefined=osal_libstdcxx_initialize
 )

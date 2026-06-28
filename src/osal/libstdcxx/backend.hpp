@@ -44,6 +44,9 @@ namespace osal
         [[nodiscard]] bool active() noexcept;
         [[nodiscard]] bool in_thread_context() noexcept;
 
+        [[nodiscard]] UINT initialize_cxx_guard() noexcept;
+        void destroy_cxx_guard() noexcept;
+
         int thread_create(ThreadHandle* thread, void* (*entry)(void*), void* argument) noexcept;
         int thread_join(ThreadHandle thread, void** result) noexcept;
         int thread_detach(ThreadHandle thread) noexcept;

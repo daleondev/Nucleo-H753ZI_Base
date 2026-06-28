@@ -1133,12 +1133,18 @@ namespace osal
         if (status != TX_SUCCESS) {
             return status;
         }
+        status = detail::initialize_cxx_guard();
+        if (status != TX_SUCCESS) {
+            static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
+            return status;
+        }
         status = tx_queue_create(&detail::cleanup_queue,
                                  detail::cleanup_queue_name,
                                  TX_1_ULONG,
                                  detail::cleanup_queue_storage,
                                  sizeof(detail::cleanup_queue_storage));
         if (status != TX_SUCCESS) {
+            detail::destroy_cxx_guard();
             static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
@@ -1151,6 +1157,7 @@ namespace osal
                                  TX_AUTO_ACTIVATE);
         if (status != TX_SUCCESS) {
             static_cast<void>(tx_queue_delete(&detail::cleanup_queue));
+            detail::destroy_cxx_guard();
             static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
@@ -1167,6 +1174,7 @@ namespace osal
         if (status != TX_SUCCESS) {
             static_cast<void>(tx_timer_delete(&detail::rollover_timer));
             static_cast<void>(tx_queue_delete(&detail::cleanup_queue));
+            detail::destroy_cxx_guard();
             static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
