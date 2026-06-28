@@ -1,8 +1,6 @@
-#include "libc.h"
-
 #if defined(HAL_PLATFORM_LINUX)
 
-void osal_newlib_initialize(void)
+void osal_libc_initialize(void)
 {
     /* The ThreadX Linux port represents every simulated ThreadX thread with a
      * pthread. glibc therefore supplies both internal locking and per-pthread
@@ -153,7 +151,7 @@ static int create_lock(__lock_t* lock, CHAR* name)
     return 0;
 }
 
-void osal_newlib_initialize(void)
+void osal_libc_initialize(void)
 {
     if (libc_locks_ready) {
         return;
@@ -257,25 +255,25 @@ void __retarget_lock_release(_LOCK_T lock) { release_libc_lock(lock); }
 
 void __retarget_lock_release_recursive(_LOCK_T lock) { __retarget_lock_release(lock); }
 
-void osal_newlib_thread_create(TX_THREAD* thread_ptr)
+void osal_libc_thread_create(TX_THREAD* thread_ptr)
 {
     if (thread_ptr == TX_NULL) {
         libc_lock_failure();
     }
 
-    _REENT_INIT_PTR(&thread_ptr->tx_thread_newlib_reent);
+    _REENT_INIT_PTR(&thread_ptr->tx_thread_libc_reent);
 }
 
-void osal_newlib_thread_delete(TX_THREAD* thread_ptr)
+void osal_libc_thread_delete(TX_THREAD* thread_ptr)
 {
     if (thread_ptr == TX_NULL) {
         libc_lock_failure();
     }
 
-    if (_impure_ptr == &thread_ptr->tx_thread_newlib_reent) {
+    if (_impure_ptr == &thread_ptr->tx_thread_libc_reent) {
         _impure_ptr = &_impure_data;
     }
-    _reclaim_reent(&thread_ptr->tx_thread_newlib_reent);
+    _reclaim_reent(&thread_ptr->tx_thread_libc_reent);
 }
 
 void _tx_execution_initialize(void) { _impure_ptr = &_impure_data; }
@@ -286,7 +284,7 @@ void _tx_execution_thread_enter(void)
         _impure_ptr = &_impure_data;
     }
     else {
-        _impure_ptr = &_tx_thread_current_ptr->tx_thread_newlib_reent;
+        _impure_ptr = &_tx_thread_current_ptr->tx_thread_libc_reent;
     }
 }
 

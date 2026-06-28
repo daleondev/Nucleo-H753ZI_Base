@@ -21,23 +21,23 @@ struct TX_THREAD_STRUCT;
 extern "C" {
 #endif
 
-void osal_newlib_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
-void osal_newlib_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
-void osal_newlib_initialize(void);
+extern void osal_libc_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
+extern void osal_libc_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
+extern void osal_libc_initialize(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-/* Every ThreadX thread owns the Newlib state used by errno and stdio. */
-#define TX_THREAD_USER_EXTENSION struct _reent tx_thread_newlib_reent;
+/* Every ThreadX thread owns the libc state used by errno and stdio. */
+#define TX_THREAD_USER_EXTENSION struct _reent tx_thread_libc_reent;
 #define TX_THREAD_CREATE_INTERNAL_EXTENSION(thread_ptr) \
-    osal_newlib_thread_create(thread_ptr);
+    osal_libc_thread_create(thread_ptr);
 
 /* ThreadX invokes this after kernel objects are initialized and before
  * tx_application_define(), which is the first safe point for creating the
- * mutexes used by Newlib. */
-#define TX_INITIALIZE_KERNEL_ENTER_EXTENSION osal_newlib_initialize();
+ * mutexes used by libc. */
+#define TX_INITIALIZE_KERNEL_ENTER_EXTENSION osal_libc_initialize();
 
 /* Newlib may free lazily allocated buffers while reclaiming a reentrancy
  * object. ThreadX invokes this hook with interrupts disabled, so restore the
@@ -45,7 +45,7 @@ void osal_newlib_initialize(void);
 #define TX_THREAD_DELETE_PORT_COMPLETION(thread_ptr) \
     do {                                             \
         TX_RESTORE                                   \
-        osal_newlib_thread_delete(thread_ptr);       \
+        osal_libc_thread_delete(thread_ptr);         \
         TX_DISABLE                                   \
     } while (0);
 
