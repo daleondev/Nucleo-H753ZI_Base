@@ -9,20 +9,21 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <utility>
 
 // ThreadX requires mutable C control blocks, raw stack storage, C callbacks,
 // and explicit lifetime management at this implementation boundary.
-// NOLINTBEGIN(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-missing-std-forward,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-pro-type-const-cast,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-vararg,modernize-avoid-c-arrays,readability-magic-numbers,readability-math-missing-parentheses,readability-named-parameter)
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-macro-usage,cppcoreguidelines-missing-std-forward,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-pro-type-const-cast,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-vararg,modernize-avoid-c-arrays,readability-magic-numbers,readability-math-missing-parentheses,readability-named-parameter)
 
-#ifndef OSAL_STD_THREAD_STACK_SIZE
-#define OSAL_STD_THREAD_STACK_SIZE 4096U
+#ifndef RUNTIME_STD_THREAD_STACK_SIZE
+#define RUNTIME_STD_THREAD_STACK_SIZE 4096U
 #endif
 
-#ifndef OSAL_STD_THREAD_PRIORITY
-#define OSAL_STD_THREAD_PRIORITY 16U
+#ifndef RUNTIME_STD_THREAD_PRIORITY
+#define RUNTIME_STD_THREAD_PRIORITY 16U
 #endif
 
-namespace osal
+namespace runtime
 {
     namespace detail
     {
@@ -43,12 +44,14 @@ namespace osal
                 constexpr auto maximum{
                     static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
                 };
-                if (seconds > maximum / NANOSECONDS_PER_SECOND) {
+                const std::uint64_t fractional_nanoseconds{
+                    remainder * NANOSECONDS_PER_SECOND / TX_TIMER_TICKS_PER_SECOND
+                };
+                if (seconds > (maximum - fractional_nanoseconds) / NANOSECONDS_PER_SECOND) {
                     return std::numeric_limits<std::int64_t>::max();
                 }
                 return static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
-                                                 remainder * NANOSECONDS_PER_SECOND /
-                                                   TX_TIMER_TICKS_PER_SECOND);
+                                                 fractional_nanoseconds);
             }
 
             struct MutexImplementation
@@ -100,7 +103,7 @@ namespace osal
             };
 
             static_assert(offsetof(ThreadControl, thread) == 0U);
-            static_assert(OSAL_STD_THREAD_PRIORITY < 32U);
+            static_assert(RUNTIME_STD_THREAD_PRIORITY < 32U);
 
             TX_MUTEX initialization_mutex;
             TX_QUEUE cleanup_queue;
@@ -127,6 +130,116 @@ namespace osal
             std::uint64_t tick_epoch{};
             std::int64_t system_clock_epoch_nanoseconds{};
             std::uint64_t system_clock_epoch_ticks{};
+            PlatformHighResolutionCounter high_resolution_counter_epoch{};
+            bool system_clock_epoch_available{};
+            bool high_resolution_counter_available{};
+
+            [[nodiscard]] bool valid_high_resolution_counter(
+              const PlatformHighResolutionCounter& counter) noexcept
+            {
+                return counter.ticks_per_second != 0U &&
+                       counter.ticks_per_second <= NANOSECONDS_PER_SECOND &&
+                       (counter.modulus == 0U || counter.ticks < counter.modulus);
+            }
+
+            [[nodiscard]] bool thread_ticks_to_counter_ticks(std::uint64_t ticks,
+                                                              std::uint64_t frequency,
+                                                              std::uint64_t& result) noexcept
+            {
+                const std::uint64_t seconds{ ticks / TX_TIMER_TICKS_PER_SECOND };
+                const std::uint64_t remainder{ ticks % TX_TIMER_TICKS_PER_SECOND };
+                const std::uint64_t fractional_ticks{
+                    remainder * frequency / TX_TIMER_TICKS_PER_SECOND
+                };
+                if (seconds >
+                    (std::numeric_limits<std::uint64_t>::max() - fractional_ticks) / frequency) {
+                    return false;
+                }
+                result = seconds * frequency + fractional_ticks;
+                return true;
+            }
+
+            [[nodiscard]] bool counter_ticks_to_nanoseconds(std::uint64_t ticks,
+                                                             std::uint64_t frequency,
+                                                             std::int64_t& result) noexcept
+            {
+                const std::uint64_t seconds{ ticks / frequency };
+                const std::uint64_t remainder{ ticks % frequency };
+                constexpr auto maximum{
+                    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
+                };
+                const std::uint64_t fractional_nanoseconds{
+                    remainder * NANOSECONDS_PER_SECOND / frequency
+                };
+                if (seconds > (maximum - fractional_nanoseconds) / NANOSECONDS_PER_SECOND) {
+                    return false;
+                }
+                result = static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
+                                                   fractional_nanoseconds);
+                return true;
+            }
+
+            [[nodiscard]] bool high_resolution_elapsed_nanoseconds(std::uint64_t current_thread_ticks,
+                                                                    std::int64_t& result) noexcept
+            {
+                if (!high_resolution_counter_available) {
+                    return false;
+                }
+
+                PlatformHighResolutionCounter current{};
+                if (platform_get_high_resolution_counter(&current) != HAL_OK ||
+                    !valid_high_resolution_counter(current) ||
+                    current.ticks_per_second != high_resolution_counter_epoch.ticks_per_second ||
+                    current.modulus != high_resolution_counter_epoch.modulus) {
+                    return false;
+                }
+
+                std::uint64_t elapsed_counter_ticks{};
+                if (current.modulus == 0U) {
+                    if (current.ticks < high_resolution_counter_epoch.ticks) {
+                        return false;
+                    }
+                    elapsed_counter_ticks = current.ticks - high_resolution_counter_epoch.ticks;
+                }
+                else {
+                    const std::uint64_t modular_elapsed{
+                        current.ticks >= high_resolution_counter_epoch.ticks
+                          ? current.ticks - high_resolution_counter_epoch.ticks
+                          : current.modulus - high_resolution_counter_epoch.ticks + current.ticks
+                    };
+                    std::uint64_t coarse_elapsed{};
+                    if (!thread_ticks_to_counter_ticks(current_thread_ticks - system_clock_epoch_ticks,
+                                                       current.ticks_per_second,
+                                                       coarse_elapsed)) {
+                        return false;
+                    }
+
+                    std::uint64_t wraps{};
+                    if (coarse_elapsed >= modular_elapsed) {
+                        const std::uint64_t difference{ coarse_elapsed - modular_elapsed };
+                        wraps = difference / current.modulus;
+                        const std::uint64_t remainder{ difference % current.modulus };
+                        if (remainder >= current.modulus - remainder) {
+                            ++wraps;
+                        }
+                    }
+                    else if (modular_elapsed - coarse_elapsed > current.modulus / 2U) {
+                        // A reset or stopped timer can look like a wrap. Reject
+                        // it when ThreadX's coarse clock cannot corroborate it.
+                        return false;
+                    }
+
+                    if (wraps >
+                        (std::numeric_limits<std::uint64_t>::max() - modular_elapsed) /
+                          current.modulus) {
+                        return false;
+                    }
+                    elapsed_counter_ticks = modular_elapsed + wraps * current.modulus;
+                }
+
+                return counter_ticks_to_nanoseconds(
+                  elapsed_counter_ticks, current.ticks_per_second, result);
+            }
 
             [[nodiscard]] bool interrupt_context() noexcept
             {
@@ -537,7 +650,7 @@ namespace osal
             if (control == nullptr) {
                 return EAGAIN;
             }
-            control->stack = ::operator new[](OSAL_STD_THREAD_STACK_SIZE, std::nothrow);
+            control->stack = ::operator new[](RUNTIME_STD_THREAD_STACK_SIZE, std::nothrow);
             if (control->stack == nullptr) {
                 delete control;
                 return EAGAIN;
@@ -570,9 +683,9 @@ namespace osal
                                                 thread_entry,
                                                 control->registry_id,
                                                 control->stack,
-                                                OSAL_STD_THREAD_STACK_SIZE,
-                                                OSAL_STD_THREAD_PRIORITY,
-                                                OSAL_STD_THREAD_PRIORITY,
+                                                RUNTIME_STD_THREAD_STACK_SIZE,
+                                                RUNTIME_STD_THREAD_PRIORITY,
+                                                RUNTIME_STD_THREAD_PRIORITY,
                                                 TX_NO_TIME_SLICE,
                                                 TX_AUTO_START) };
             if (status != TX_SUCCESS) {
@@ -1042,9 +1155,15 @@ namespace osal
 
         std::int64_t system_time_nanoseconds() noexcept
         {
-            const std::int64_t elapsed{
-                ticks_to_nanoseconds(steady_ticks() - system_clock_epoch_ticks)
-            };
+            const std::uint64_t current_ticks{ steady_ticks() };
+            if (!system_clock_epoch_available) {
+                return ticks_to_nanoseconds(current_ticks);
+            }
+
+            std::int64_t elapsed{};
+            if (!high_resolution_elapsed_nanoseconds(current_ticks, elapsed)) {
+                elapsed = ticks_to_nanoseconds(current_ticks - system_clock_epoch_ticks);
+            }
             if (elapsed == std::numeric_limits<std::int64_t>::max() ||
                 system_clock_epoch_nanoseconds > std::numeric_limits<std::int64_t>::max() - elapsed) {
                 return std::numeric_limits<std::int64_t>::max();
@@ -1108,6 +1227,7 @@ namespace osal
 
         detail::last_tick = static_cast<std::uint32_t>(tx_time_get());
         detail::tick_epoch = 0U;
+        detail::system_clock_epoch_ticks = detail::steady_ticks();
 
         std::int64_t seconds_since_epoch{};
         std::uint32_t nanoseconds{};
@@ -1117,16 +1237,21 @@ namespace osal
         constexpr std::uint64_t maximum_seconds{
             maximum_nanoseconds / detail::NANOSECONDS_PER_SECOND
         };
-        if (platform_get_system_time(&seconds_since_epoch, &nanoseconds) != HAL_OK ||
-            seconds_since_epoch < 0 || nanoseconds >= detail::NANOSECONDS_PER_SECOND ||
-            static_cast<std::uint64_t>(seconds_since_epoch) > maximum_seconds ||
-            (static_cast<std::uint64_t>(seconds_since_epoch) == maximum_seconds &&
-             nanoseconds > maximum_nanoseconds % detail::NANOSECONDS_PER_SECOND)) {
-            return TX_NOT_DONE;
+        detail::system_clock_epoch_available =
+          platform_get_system_time(&seconds_since_epoch, &nanoseconds) == HAL_OK &&
+          seconds_since_epoch >= 0 && nanoseconds < detail::NANOSECONDS_PER_SECOND &&
+          std::cmp_less_equal(static_cast<std::uint64_t>(seconds_since_epoch), maximum_seconds) &&
+          (std::cmp_not_equal(static_cast<std::uint64_t>(seconds_since_epoch), maximum_seconds) ||
+           nanoseconds <= maximum_nanoseconds % detail::NANOSECONDS_PER_SECOND);
+        if (detail::system_clock_epoch_available) {
+            detail::system_clock_epoch_nanoseconds =
+              seconds_since_epoch * static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) +
+              nanoseconds;
         }
-        detail::system_clock_epoch_nanoseconds =
-          seconds_since_epoch * static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) + nanoseconds;
-        detail::system_clock_epoch_ticks = detail::steady_ticks();
+
+        detail::high_resolution_counter_available =
+          platform_get_high_resolution_counter(&detail::high_resolution_counter_epoch) == HAL_OK &&
+          detail::valid_high_resolution_counter(detail::high_resolution_counter_epoch);
 
         UINT status{ tx_mutex_create(
           &detail::initialization_mutex, detail::initialization_mutex_name, TX_INHERIT) };
@@ -1184,11 +1309,11 @@ namespace osal
     }
 }
 
-extern "C" void osal_libstdcxx_initialize(void)
+extern "C" void runtime_libstdcxx_initialize(void)
 {
-    if (osal::initialize() != TX_SUCCESS) {
+    if (runtime::initialize() != TX_SUCCESS) {
         std::terminate();
     }
 }
 
-// NOLINTEND(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-missing-std-forward,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-pro-type-const-cast,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-vararg,modernize-avoid-c-arrays,readability-magic-numbers,readability-math-missing-parentheses,readability-named-parameter)
+// NOLINTEND(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-macro-usage,cppcoreguidelines-missing-std-forward,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-bounds-array-to-pointer-decay,cppcoreguidelines-pro-type-const-cast,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-vararg,modernize-avoid-c-arrays,readability-magic-numbers,readability-math-missing-parentheses,readability-named-parameter)

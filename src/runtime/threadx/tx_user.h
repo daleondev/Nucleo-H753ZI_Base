@@ -1,8 +1,8 @@
-#ifndef OSAL_THREADX_TX_USER_H
-#define OSAL_THREADX_TX_USER_H
+#ifndef RUNTIME_THREADX_TX_USER_H
+#define RUNTIME_THREADX_TX_USER_H
 
 /* Project-owned ThreadX configuration. Keep generated CubeMX headers free of
- * OSAL policy so CubeMX regeneration cannot overwrite this integration. */
+ * runtime policy so CubeMX regeneration cannot overwrite this integration. */
 
 #define TX_DISABLE_PREEMPTION_THRESHOLD
 #define TX_DISABLE_NOTIFY_CALLBACKS
@@ -25,12 +25,12 @@ struct TX_THREAD_STRUCT;
 extern "C" {
 #endif
 
-extern void osal_libstdcxx_initialize(void);
+extern void runtime_libstdcxx_initialize(void);
 
 #if defined(__ARM_EABI__)
-extern void osal_libc_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
-extern void osal_libc_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
-extern void osal_libc_initialize(void);
+extern void runtime_libc_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
+extern void runtime_libc_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
+extern void runtime_libc_initialize(void);
 #endif
 
 #ifdef __cplusplus
@@ -42,23 +42,23 @@ extern void osal_libc_initialize(void);
 /* Every ThreadX thread owns the libc state used by errno and stdio. */
 #define TX_THREAD_USER_EXTENSION struct _reent tx_thread_libc_reent;
 #define TX_THREAD_CREATE_INTERNAL_EXTENSION(thread_ptr) \
-    osal_libc_thread_create(thread_ptr);
+    runtime_libc_thread_create(thread_ptr);
 
-#define OSAL_THREADX_LIBC_INITIALIZE() osal_libc_initialize()
+#define RUNTIME_THREADX_LIBC_INITIALIZE() runtime_libc_initialize()
 
 #else
 
-#define OSAL_THREADX_LIBC_INITIALIZE() ((void)0)
+#define RUNTIME_THREADX_LIBC_INITIALIZE() ((void)0)
 
 #endif
 
 /* ThreadX invokes this after kernel objects are initialized and before
- * tx_application_define(), which is the first safe point for creating OSAL
+ * tx_application_define(), which is the first safe point for creating
  * runtime objects. */
 #define TX_INITIALIZE_KERNEL_ENTER_EXTENSION \
     do {                                       \
-        OSAL_THREADX_LIBC_INITIALIZE();        \
-        osal_libstdcxx_initialize();           \
+        RUNTIME_THREADX_LIBC_INITIALIZE();     \
+        runtime_libstdcxx_initialize();        \
     } while (0);
 
 #if defined(__ARM_EABI__)
@@ -68,11 +68,11 @@ extern void osal_libc_initialize(void);
 #define TX_THREAD_DELETE_PORT_COMPLETION(thread_ptr) \
     do {                                             \
         TX_RESTORE                                   \
-        osal_libc_thread_delete(thread_ptr);         \
+        runtime_libc_thread_delete(thread_ptr);      \
         TX_DISABLE                                   \
     } while (0);
 #endif
 
 #endif /* !defined(__ASSEMBLER__) */
 
-#endif /* OSAL_THREADX_TX_USER_H */
+#endif /* RUNTIME_THREADX_TX_USER_H */

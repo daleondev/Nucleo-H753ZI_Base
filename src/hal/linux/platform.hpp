@@ -20,6 +20,13 @@ typedef struct
     uint32_t Instance;
 } TIM_HandleTypeDef;
 
+typedef struct
+{
+    uint64_t ticks;
+    uint64_t ticks_per_second;
+    uint64_t modulus;
+} PlatformHighResolutionCounter;
+
 extern TIM_HandleTypeDef htim2;
 
 typedef enum
@@ -79,6 +86,7 @@ void MX_TIM2_Init(void);
 void MX_RNG_Init(void);
 void MX_FDCAN1_Init(void);
 HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds);
+HAL_StatusTypeDef platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter);
 
 int32_t BSP_LED_Init(Led_TypeDef led);
 int32_t BSP_LED_Toggle(Led_TypeDef led);

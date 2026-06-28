@@ -10,6 +10,9 @@
 // ABI entry points deliberately accept an opaque pointer.
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 
+// These names and mutable C objects are required by the C++ ABI and ThreadX.
+// NOLINTBEGIN(bugprone-reserved-identifier,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+
 namespace
 {
     constexpr std::size_t INITIALIZED_BYTE{ 0U };
@@ -30,7 +33,7 @@ namespace
 
     [[noreturn]] void guard_failure(const char* operation, UINT status) noexcept
     {
-        osal::detail::fatal_error(operation, status);
+        runtime::detail::fatal_error(operation, status);
     }
 
     [[nodiscard]] bool locking_required() noexcept
@@ -75,7 +78,7 @@ namespace
     }
 }
 
-namespace osal::detail
+namespace runtime::detail
 {
     UINT initialize_cxx_guard() noexcept
     {
@@ -157,3 +160,5 @@ extern "C" void __cxa_guard_abort(void* guard)
     store_guard_byte(guard, IN_PROGRESS_BYTE, 0U, __ATOMIC_RELEASE);
     release_guard_mutex(locking_required());
 }
+
+// NOLINTEND(bugprone-reserved-identifier,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)

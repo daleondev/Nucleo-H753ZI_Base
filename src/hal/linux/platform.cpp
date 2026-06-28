@@ -3,13 +3,17 @@
 #include <array>
 #include <cassert>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <limits>
 #include <string>
 #include <string_view>
 
 namespace
 {
+    constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
+
     struct LedState
     {
         std::string_view name;
@@ -78,6 +82,27 @@ HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_
     return HAL_OK;
 }
 
+HAL_StatusTypeDef platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter)
+{
+    if (counter == nullptr || htim2.Instance == 0U) {
+        return HAL_ERROR;
+    }
+
+    timespec current_time{};
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &current_time) != 0 || current_time.tv_sec < 0 ||
+        current_time.tv_nsec < 0 ||
+        static_cast<std::uint64_t>(current_time.tv_sec) >
+          std::numeric_limits<std::uint64_t>::max() / NANOSECONDS_PER_SECOND) {
+        return HAL_ERROR;
+    }
+
+    counter->ticks = static_cast<std::uint64_t>(current_time.tv_sec) * NANOSECONDS_PER_SECOND +
+                     static_cast<std::uint64_t>(current_time.tv_nsec);
+    counter->ticks_per_second = NANOSECONDS_PER_SECOND;
+    counter->modulus = 0U;
+    return HAL_OK;
+}
+
 void MX_TIM2_Init() { print_message("MX_TIM2_Init"); }
 
 void MX_RNG_Init() { print_message("MX_RNG_Init"); }
@@ -124,7 +149,10 @@ int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init)
 
 HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef* timer_handle)
 {
-    static_cast<void>(timer_handle);
+    if (timer_handle != &htim2) {
+        return HAL_ERROR;
+    }
+    timer_handle->Instance = 1U;
     print_message("HAL_TIM_Base_Start");
     return HAL_OK;
 }

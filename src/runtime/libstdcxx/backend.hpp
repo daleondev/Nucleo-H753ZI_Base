@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <ctime>
 
-namespace osal
+namespace runtime
 {
     [[nodiscard]] UINT initialize() noexcept;
 

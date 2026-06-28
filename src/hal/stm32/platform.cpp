@@ -67,3 +67,30 @@ extern "C" HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epo
       (static_cast<uint64_t>(time.SecondFraction) + 1U));
     return HAL_OK;
 }
+
+extern "C" HAL_StatusTypeDef
+platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter)
+{
+    if (counter == nullptr || htim2.Instance != TIM2 ||
+        (htim2.Instance->CR1 & TIM_CR1_CEN) == 0U || (RCC->CFGR & RCC_CFGR_TIMPRE) != 0U) {
+        return HAL_ERROR;
+    }
+
+    RCC_ClkInitTypeDef clock_configuration{};
+    uint32_t flash_latency{};
+    HAL_RCC_GetClockConfig(&clock_configuration, &flash_latency);
+
+    const uint64_t peripheral_clock{ HAL_RCC_GetPCLK1Freq() };
+    const uint64_t timer_clock{ clock_configuration.APB1CLKDivider == RCC_HCLK_DIV1
+                                  ? peripheral_clock
+                                  : peripheral_clock * 2U };
+    const uint64_t prescaler{ static_cast<uint64_t>(htim2.Init.Prescaler) + 1U };
+    if (timer_clock == 0U || prescaler == 0U || timer_clock % prescaler != 0U) {
+        return HAL_ERROR;
+    }
+
+    counter->ticks = __HAL_TIM_GET_COUNTER(&htim2);
+    counter->ticks_per_second = timer_clock / prescaler;
+    counter->modulus = static_cast<uint64_t>(htim2.Init.Period) + 1U;
+    return counter->ticks_per_second == 0U || counter->modulus == 0U ? HAL_ERROR : HAL_OK;
+}

@@ -22,6 +22,7 @@
 
 static_assert(std::is_same_v<__gthread_t, TX_THREAD*>);
 static_assert(std::is_same_v<std::thread::native_handle_type, TX_THREAD*>);
+static_assert(std::is_same_v<std::chrono::high_resolution_clock, std::chrono::system_clock>);
 
 namespace
 {
@@ -96,17 +97,21 @@ namespace std
     {
         steady_clock::time_point steady_clock::now() noexcept
         {
-            return time_point{ duration{ osal::detail::steady_time_nanoseconds() } };
+            return time_point{ duration{ runtime::detail::steady_time_nanoseconds() } };
         }
 
         system_clock::time_point system_clock::now() noexcept
         {
-            return time_point{ duration{ osal::detail::system_time_nanoseconds() } };
+            // GCC aliases high_resolution_clock to system_clock on both
+            // supported toolchains, so this definition implements both clocks.
+            return time_point{ duration{ runtime::detail::system_time_nanoseconds() } };
         }
     }
 
     namespace this_thread
     {
+        // This is the libstdc++ ABI entry point declared by <thread>.
+        // NOLINTNEXTLINE(bugprone-reserved-identifier)
         void __sleep_for(chrono::seconds seconds, chrono::nanoseconds nanoseconds)
         {
             if (seconds.count() < 0 || nanoseconds.count() < 0) {
@@ -115,11 +120,11 @@ namespace std
             constexpr std::uint64_t nanoseconds_per_second{ 1'000'000'000ULL };
             const auto seconds_count{ static_cast<std::uint64_t>(seconds.count()) };
             if (seconds_count > (std::numeric_limits<std::uint64_t>::max() / nanoseconds_per_second)) {
-                osal::detail::sleep_for(std::numeric_limits<std::uint64_t>::max());
+                runtime::detail::sleep_for(std::numeric_limits<std::uint64_t>::max());
                 return;
             }
-            osal::detail::sleep_for((seconds_count * nanoseconds_per_second) +
-                                    static_cast<std::uint64_t>(nanoseconds.count()));
+            runtime::detail::sleep_for((seconds_count * nanoseconds_per_second) +
+                                       static_cast<std::uint64_t>(nanoseconds.count()));
         }
     }
 }

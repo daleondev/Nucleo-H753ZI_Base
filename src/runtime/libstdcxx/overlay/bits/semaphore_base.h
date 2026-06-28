@@ -1,7 +1,7 @@
-#ifndef OSAL_SEMAPHORE_BASE_H
-#define OSAL_SEMAPHORE_BASE_H
+#ifndef RUNTIME_SEMAPHORE_BASE_H
+#define RUNTIME_SEMAPHORE_BASE_H
 
-#include "osal/libstdcxx/backend.hpp"
+#include "runtime/libstdcxx/backend.hpp"
 
 #include <bits/chrono.h>
 
@@ -22,7 +22,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
         explicit __threadx_semaphore(ptrdiff_t count) noexcept
         {
             if (count < 0 ||
-                osal::detail::semaphore_init(&m_semaphore, static_cast<unsigned int>(count)) != 0) {
+                runtime::detail::semaphore_init(&m_semaphore, static_cast<unsigned int>(count)) != 0) {
                 std::terminate();
             }
         }
@@ -32,21 +32,21 @@ namespace std _GLIBCXX_VISIBILITY(default)
 
         ~__threadx_semaphore()
         {
-            if (osal::detail::semaphore_destroy(&m_semaphore) != 0) {
+            if (runtime::detail::semaphore_destroy(&m_semaphore) != 0) {
                 std::terminate();
             }
         }
 
         void _M_acquire() noexcept
         {
-            if (osal::detail::semaphore_wait(&m_semaphore) != 0) {
+            if (runtime::detail::semaphore_wait(&m_semaphore) != 0) {
                 std::terminate();
             }
         }
 
         [[nodiscard]] bool _M_try_acquire() noexcept
         {
-            const int status{ osal::detail::semaphore_try_wait(&m_semaphore) };
+            const int status{ runtime::detail::semaphore_try_wait(&m_semaphore) };
             if (status != 0 && status != EAGAIN) {
                 std::terminate();
             }
@@ -56,7 +56,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
         void _M_release(ptrdiff_t update) noexcept
         {
             while (update-- > 0) {
-                if (osal::detail::semaphore_post(&m_semaphore) != 0) {
+                if (runtime::detail::semaphore_post(&m_semaphore) != 0) {
                     std::terminate();
                 }
             }
@@ -74,11 +74,11 @@ namespace std _GLIBCXX_VISIBILITY(default)
             if constexpr (is_same_v<Clock, chrono::system_clock>) {
                 const auto seconds{ chrono::time_point_cast<chrono::seconds>(deadline) };
                 const auto nanoseconds{ chrono::duration_cast<chrono::nanoseconds>(deadline - seconds) };
-                const osal::detail::TimePoint native_deadline{
+                const runtime::detail::TimePoint native_deadline{
                     .tv_sec = static_cast<time_t>(seconds.time_since_epoch().count()),
                     .tv_nsec = static_cast<long>(nanoseconds.count())
                 };
-                const int status{ osal::detail::semaphore_timed_wait(&m_semaphore, &native_deadline) };
+                const int status{ runtime::detail::semaphore_timed_wait(&m_semaphore, &native_deadline) };
                 if (status != 0 && status != ETIMEDOUT) {
                     std::terminate();
                 }
@@ -94,7 +94,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
         }
 
       private:
-        osal::detail::SemaphoreHandle m_semaphore{};
+        runtime::detail::SemaphoreHandle m_semaphore{};
     };
 
     using __semaphore_impl = __threadx_semaphore;
@@ -102,4 +102,4 @@ namespace std _GLIBCXX_VISIBILITY(default)
     _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace std
 
-#endif // OSAL_SEMAPHORE_BASE_H
+#endif // RUNTIME_SEMAPHORE_BASE_H

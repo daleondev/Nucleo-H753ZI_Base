@@ -1,6 +1,6 @@
 #if defined(HAL_PLATFORM_LINUX)
 
-void osal_libc_initialize(void)
+void runtime_libc_initialize(void)
 {
     /* The ThreadX Linux port represents every simulated ThreadX thread with a
      * pthread. glibc therefore supplies both internal locking and per-pthread
@@ -151,7 +151,7 @@ static int create_lock(__lock_t* lock, CHAR* name)
     return 0;
 }
 
-void osal_libc_initialize(void)
+void runtime_libc_initialize(void)
 {
     if (libc_locks_ready) {
         return;
@@ -255,7 +255,7 @@ void __retarget_lock_release(_LOCK_T lock) { release_libc_lock(lock); }
 
 void __retarget_lock_release_recursive(_LOCK_T lock) { __retarget_lock_release(lock); }
 
-void osal_libc_thread_create(TX_THREAD* thread_ptr)
+void runtime_libc_thread_create(TX_THREAD* thread_ptr)
 {
     if (thread_ptr == TX_NULL) {
         libc_lock_failure();
@@ -264,7 +264,7 @@ void osal_libc_thread_create(TX_THREAD* thread_ptr)
     _REENT_INIT_PTR(&thread_ptr->tx_thread_libc_reent);
 }
 
-void osal_libc_thread_delete(TX_THREAD* thread_ptr)
+void runtime_libc_thread_delete(TX_THREAD* thread_ptr)
 {
     if (thread_ptr == TX_NULL) {
         libc_lock_failure();
