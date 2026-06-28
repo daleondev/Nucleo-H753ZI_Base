@@ -22,7 +22,7 @@
 #define __GTHREAD_HAS_COND 1
 
 typedef runtime::detail::ThreadHandle __gthread_t;
-typedef unsigned int __gthread_key_t;
+typedef runtime::detail::KeyHandle __gthread_key_t;
 typedef runtime::detail::OnceHandle __gthread_once_t;
 typedef runtime::detail::MutexHandle __gthread_mutex_t;
 typedef runtime::detail::RecursiveMutexHandle __gthread_recursive_mutex_t;
@@ -156,9 +156,18 @@ inline int __gthread_once(__gthread_once_t* once_control, void (*function)())
     return runtime::detail::once(once_control, function);
 }
 
-inline int __gthread_key_create(__gthread_key_t*, void (*)(void*)) { return ENOTSUP; }
-inline int __gthread_key_delete(__gthread_key_t) { return ENOTSUP; }
-inline void* __gthread_getspecific(__gthread_key_t) { return nullptr; }
-inline int __gthread_setspecific(__gthread_key_t, const void*) { return ENOTSUP; }
+inline int __gthread_key_create(__gthread_key_t* key, void (*destructor)(void*))
+{
+    return runtime::detail::key_create(key, destructor);
+}
+
+inline int __gthread_key_delete(__gthread_key_t key) { return runtime::detail::key_delete(key); }
+
+inline void* __gthread_getspecific(__gthread_key_t key) { return runtime::detail::key_get(key); }
+
+inline int __gthread_setspecific(__gthread_key_t key, const void* value)
+{
+    return runtime::detail::key_set(key, value);
+}
 
 #endif // RUNTIME_GTHR_DEFAULT_H

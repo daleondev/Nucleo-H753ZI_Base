@@ -16,6 +16,9 @@ option(ENABLE_LIBC_LOCK_TEST "Run the two-thread libc lock self-test at startup"
 option(ENABLE_THREADSAFE_STATIC_TEST
        "Run the contended function-local static initialization self-test at startup"
        ON)
+option(ENABLE_STANDARD_LIBRARY_SELF_TEST
+       "Run the ThreadX-backed C++ concurrency self-test at startup"
+       OFF)
 option(ENABLE_CLANG_TIDY "Run clang-tidy while compiling project-owned C++ targets" OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -50,6 +53,13 @@ if(ENABLE_THREADSAFE_STATIC_TEST)
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE
             ENABLE_THREADSAFE_STATIC_TEST=1
+    )
+endif()
+
+if(ENABLE_STANDARD_LIBRARY_SELF_TEST)
+    target_compile_definitions(${PROJECT_NAME}
+        PRIVATE
+            ENABLE_STANDARD_LIBRARY_SELF_TEST=1
     )
 endif()
 

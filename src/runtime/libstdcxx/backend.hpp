@@ -39,6 +39,7 @@ namespace runtime
         };
 
         using ThreadHandle = TX_THREAD*;
+        using KeyHandle = unsigned int;
         using TimePoint = timespec;
 
         [[nodiscard]] bool active() noexcept;
@@ -52,6 +53,11 @@ namespace runtime
         int thread_detach(ThreadHandle thread) noexcept;
         [[nodiscard]] ThreadHandle thread_self() noexcept;
         int thread_yield() noexcept;
+
+        int key_create(KeyHandle* key, void (*destructor)(void*)) noexcept;
+        int key_delete(KeyHandle key) noexcept;
+        [[nodiscard]] void* key_get(KeyHandle key) noexcept;
+        int key_set(KeyHandle key, const void* value) noexcept;
 
         void mutex_init(MutexHandle* mutex) noexcept;
         void recursive_mutex_init(RecursiveMutexHandle* mutex) noexcept;

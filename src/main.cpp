@@ -1,6 +1,10 @@
 #include "hal/hal.hpp"
 #include "thread_diagnostics.hpp"
 
+#if defined(ENABLE_STANDARD_LIBRARY_SELF_TEST)
+#include "standard_library_self_test.hpp"
+#endif
+
 #include <tx_api.h>
 #include <tx_thread.h>
 
@@ -78,7 +82,8 @@ namespace
 
     constexpr ULONG milliseconds_to_ticks(ULONG milliseconds)
     {
-        const auto ticks = (milliseconds * TX_TIMER_TICKS_PER_SECOND + 999UL) / 1000UL;
+        const auto ticks =
+          (static_cast<unsigned long>(milliseconds) * TX_TIMER_TICKS_PER_SECOND + 999UL) / 1000UL;
         return ticks == 0 ? 1UL : ticks;
     }
 
@@ -226,6 +231,12 @@ namespace
     void tx_main(ULONG unused)
     {
         static_cast<void>(unused);
+#if defined(ENABLE_STANDARD_LIBRARY_SELF_TEST)
+        if (!run_standard_library_self_test()) {
+            Error_Handler();
+        }
+        std::fputs("[standard-library-self-test] passed\r\n", stdout);
+#endif
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
         for (ULONG worker{}; worker < THREADSAFE_STATIC_TEST_THREAD_COUNT; ++worker) {
             assert_tx_call(tx_semaphore_get(&threadsafe_static_test_done, TX_WAIT_FOREVER));

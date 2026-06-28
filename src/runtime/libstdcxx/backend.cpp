@@ -85,6 +85,13 @@ namespace runtime
                 TX_SEMAPHORE semaphore{};
             };
 
+            struct KeyDefinition
+            {
+                void (*destructor)(void*){};
+                unsigned int generation{};
+                bool allocated{};
+            };
+
             struct ThreadControl
             {
                 TX_THREAD thread{};
@@ -126,6 +133,7 @@ namespace runtime
             std::uint32_t next_thread_number{};
             ULONG next_registry_id{ 1U };
             ThreadControl* registry_head{};
+            KeyDefinition keys[RUNTIME_THREAD_KEY_COUNT];
             std::uint32_t last_tick{};
             std::uint64_t tick_epoch{};
             std::int64_t system_clock_epoch_nanoseconds{};
@@ -133,6 +141,27 @@ namespace runtime
             PlatformHighResolutionCounter high_resolution_counter_epoch{};
             bool system_clock_epoch_available{};
             bool high_resolution_counter_available{};
+
+            constexpr unsigned int KEY_INDEX_BITS{ 8U };
+            constexpr unsigned int KEY_INDEX_MASK{ (1U << KEY_INDEX_BITS) - 1U };
+            constexpr unsigned int KEY_GENERATION_MASK{ ~KEY_INDEX_MASK };
+            static_assert(RUNTIME_THREAD_KEY_COUNT > 0U);
+            static_assert(RUNTIME_THREAD_KEY_COUNT <= (1U << KEY_INDEX_BITS));
+
+            [[nodiscard]] KeyHandle make_key(std::size_t index, unsigned int generation) noexcept
+            {
+                return (generation << KEY_INDEX_BITS) | static_cast<unsigned int>(index);
+            }
+
+            [[nodiscard]] std::size_t key_index(KeyHandle key) noexcept
+            {
+                return key & KEY_INDEX_MASK;
+            }
+
+            [[nodiscard]] unsigned int key_generation(KeyHandle key) noexcept
+            {
+                return key >> KEY_INDEX_BITS;
+            }
 
             [[nodiscard]] bool valid_high_resolution_counter(
               const PlatformHighResolutionCounter& counter) noexcept
@@ -412,9 +441,12 @@ namespace runtime
                     if (status != TX_NO_INSTANCE && status != TX_NOT_AVAILABLE) {
                         return EINVAL;
                     }
-                    if (wait_ticks < MAX_FINITE_WAIT) {
-                        return ETIMEDOUT;
-                    }
+
+                    // A ThreadX tick timeout may occur just before the absolute
+                    // C++ deadline because the wait begins part-way through a
+                    // tick. Recompute the remaining time instead of reporting
+                    // an early timeout. The TX_NO_WAIT path above performs one
+                    // final acquisition attempt at or after the deadline.
                 }
             }
 
@@ -782,6 +814,120 @@ namespace runtime
             }
             tx_thread_relinquish();
             return 0;
+        }
+
+        int key_create(KeyHandle* key, void (*destructor)(void*)) noexcept
+        {
+            const int context_status{ require_thread_context() };
+            if (context_status != 0 || key == nullptr) {
+                return context_status != 0 ? context_status : EINVAL;
+            }
+
+            raw_mutex_get(&initialization_mutex);
+            for (std::size_t index{}; index < RUNTIME_THREAD_KEY_COUNT; ++index) {
+                if (!keys[index].allocated) {
+                    keys[index].allocated = true;
+                    keys[index].destructor = destructor;
+                    keys[index].generation =
+                      (keys[index].generation + 1U) & (KEY_GENERATION_MASK >> KEY_INDEX_BITS);
+                    if (keys[index].generation == 0U) {
+                        ++keys[index].generation;
+                    }
+                    *key = make_key(index, keys[index].generation);
+                    raw_mutex_put(&initialization_mutex);
+                    return 0;
+                }
+            }
+            raw_mutex_put(&initialization_mutex);
+            return EAGAIN;
+        }
+
+        int key_delete(KeyHandle key) noexcept
+        {
+            const int context_status{ require_thread_context() };
+            const std::size_t index{ key_index(key) };
+            const unsigned int generation{ key_generation(key) };
+            if (context_status != 0 || index >= RUNTIME_THREAD_KEY_COUNT || generation == 0U) {
+                return context_status != 0 ? context_status : EINVAL;
+            }
+
+            raw_mutex_get(&initialization_mutex);
+            if (!keys[index].allocated || keys[index].generation != generation) {
+                raw_mutex_put(&initialization_mutex);
+                return EINVAL;
+            }
+            keys[index].allocated = false;
+            keys[index].destructor = nullptr;
+            raw_mutex_put(&initialization_mutex);
+            return 0;
+        }
+
+        void* key_get(KeyHandle key) noexcept
+        {
+            const std::size_t index{ key_index(key) };
+            const unsigned int generation{ key_generation(key) };
+            if (require_thread_context() != 0 || index >= RUNTIME_THREAD_KEY_COUNT || generation == 0U) {
+                return nullptr;
+            }
+
+            raw_mutex_get(&initialization_mutex);
+            const bool allocated{ keys[index].allocated && keys[index].generation == generation };
+            raw_mutex_put(&initialization_mutex);
+            TX_THREAD* const current{ tx_thread_identify() };
+            if (!allocated || current->tx_thread_runtime_tls_generations[index] != generation) {
+                return nullptr;
+            }
+            return current->tx_thread_runtime_tls_values[index];
+        }
+
+        int key_set(KeyHandle key, const void* value) noexcept
+        {
+            const int context_status{ require_thread_context() };
+            const std::size_t index{ key_index(key) };
+            const unsigned int generation{ key_generation(key) };
+            if (context_status != 0 || index >= RUNTIME_THREAD_KEY_COUNT || generation == 0U) {
+                return context_status != 0 ? context_status : EINVAL;
+            }
+
+            raw_mutex_get(&initialization_mutex);
+            const bool allocated{ keys[index].allocated && keys[index].generation == generation };
+            raw_mutex_put(&initialization_mutex);
+            if (!allocated) {
+                return EINVAL;
+            }
+            TX_THREAD* const current{ tx_thread_identify() };
+            current->tx_thread_runtime_tls_generations[index] = generation;
+            current->tx_thread_runtime_tls_values[index] = const_cast<void*>(value);
+            return 0;
+        }
+
+        void run_thread_specific_destructors(TX_THREAD* thread) noexcept
+        {
+            if (!initialized || thread == nullptr) {
+                return;
+            }
+
+            constexpr unsigned int destructor_iterations{ 4U };
+            for (unsigned int pass{}; pass < destructor_iterations; ++pass) {
+                bool invoked{};
+                for (std::size_t index{}; index < RUNTIME_THREAD_KEY_COUNT; ++index) {
+                    raw_mutex_get(&initialization_mutex);
+                    auto* const destructor{ keys[index].allocated ? keys[index].destructor : nullptr };
+                    const unsigned int generation{ keys[index].generation };
+                    raw_mutex_put(&initialization_mutex);
+
+                    void* const value{ thread->tx_thread_runtime_tls_values[index] };
+                    if (destructor != nullptr && value != nullptr &&
+                        thread->tx_thread_runtime_tls_generations[index] == generation) {
+                        thread->tx_thread_runtime_tls_values[index] = nullptr;
+                        invoked = true;
+                        destructor(value);
+                    }
+                }
+                if (!invoked) {
+                    return;
+                }
+            }
         }
 
         void mutex_init(MutexHandle* mutex) noexcept
@@ -1306,6 +1452,33 @@ namespace runtime
 
         detail::initialized = true;
         return TX_SUCCESS;
+    }
+}
+
+extern "C" void runtime_libstdcxx_thread_notify(TX_THREAD* thread, UINT event)
+{
+    if (event == TX_THREAD_EXIT) {
+        runtime::detail::run_thread_specific_destructors(thread);
+    }
+}
+
+extern "C" void runtime_libstdcxx_thread_create(TX_THREAD* thread)
+{
+    if (thread == nullptr) {
+        return;
+    }
+    for (void*& value : thread->tx_thread_runtime_tls_values) {
+        value = nullptr;
+    }
+    for (unsigned int& generation : thread->tx_thread_runtime_tls_generations) {
+        generation = 0U;
+    }
+}
+
+extern "C" void runtime_libstdcxx_thread_started(TX_THREAD* thread)
+{
+    if (tx_thread_entry_exit_notify(thread, runtime_libstdcxx_thread_notify) != TX_SUCCESS) {
+        std::terminate();
     }
 }
 

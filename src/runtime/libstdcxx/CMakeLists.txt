@@ -3,9 +3,13 @@ add_library(runtime::libstdcxx ALIAS runtime_libstdcxx)
 
 target_sources(runtime_libstdcxx
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/atomic.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/backend.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cxx_guard.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/future.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libstdcxx.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/once.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/thread_exit.cpp
 )
 
 target_include_directories(runtime_libstdcxx
@@ -21,6 +25,12 @@ target_link_libraries(runtime_libstdcxx
         threadx
         project_compiler_settings
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # GCC emits libatomic calls for std::atomic<T> objects that are wider
+    # than the host's native lock-free operations.
+    target_link_libraries(runtime_libstdcxx PUBLIC atomic)
+endif()
 
 target_compile_definitions(runtime_libstdcxx
     PUBLIC
