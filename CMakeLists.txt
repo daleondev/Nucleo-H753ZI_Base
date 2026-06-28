@@ -18,7 +18,7 @@ option(ENABLE_THREADSAFE_STATIC_TEST
        ON)
 option(ENABLE_STANDARD_LIBRARY_SELF_TEST
        "Run the ThreadX-backed C++ concurrency self-test at startup"
-       OFF)
+       ON)
 option(ENABLE_CLANG_TIDY "Run clang-tidy while compiling project-owned C++ targets" OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

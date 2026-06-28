@@ -1,5 +1,4 @@
 #include "hal/hal.hpp"
-#include "thread_diagnostics.hpp"
 
 #if defined(ENABLE_STANDARD_LIBRARY_SELF_TEST)
 #include "standard_library_self_test.hpp"
@@ -265,8 +264,6 @@ namespace
             Error_Handler();
         }
 #endif
-
-        thread_diagnostics::print_all();
 
         const auto blink_period_ticks{ milliseconds_to_ticks(BLINK_PERIOD_MS) };
 

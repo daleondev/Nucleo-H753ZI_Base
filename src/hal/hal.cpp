@@ -1,9 +1,11 @@
-#include "platform.hpp"
+#include "hal.hpp"
+
+#if defined(HAL_PLATFORM_LINUX)
 
 #include <array>
 #include <cassert>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <limits>
@@ -64,44 +66,6 @@ void MX_GPIO_Init() { print_message("MX_GPIO_Init"); }
 void MX_ETH_Init() { print_message("MX_ETH_Init"); }
 
 void MX_RTC_Init() { print_message("MX_RTC_Init"); }
-
-HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds)
-{
-    if (seconds_since_epoch == nullptr || nanoseconds == nullptr) {
-        return HAL_ERROR;
-    }
-
-    timespec current_time{};
-    if (clock_gettime(CLOCK_REALTIME, &current_time) != 0 || current_time.tv_sec < 0 ||
-        current_time.tv_nsec < 0) {
-        return HAL_ERROR;
-    }
-
-    *seconds_since_epoch = static_cast<int64_t>(current_time.tv_sec);
-    *nanoseconds = static_cast<uint32_t>(current_time.tv_nsec);
-    return HAL_OK;
-}
-
-HAL_StatusTypeDef platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter)
-{
-    if (counter == nullptr || htim2.Instance == 0U) {
-        return HAL_ERROR;
-    }
-
-    timespec current_time{};
-    if (clock_gettime(CLOCK_MONOTONIC_RAW, &current_time) != 0 || current_time.tv_sec < 0 ||
-        current_time.tv_nsec < 0 ||
-        static_cast<std::uint64_t>(current_time.tv_sec) >
-          std::numeric_limits<std::uint64_t>::max() / NANOSECONDS_PER_SECOND) {
-        return HAL_ERROR;
-    }
-
-    counter->ticks = static_cast<std::uint64_t>(current_time.tv_sec) * NANOSECONDS_PER_SECOND +
-                     static_cast<std::uint64_t>(current_time.tv_nsec);
-    counter->ticks_per_second = NANOSECONDS_PER_SECOND;
-    counter->modulus = 0U;
-    return HAL_OK;
-}
 
 void MX_TIM2_Init() { print_message("MX_TIM2_Init"); }
 
@@ -164,3 +128,5 @@ void Error_Handler()
     std::abort();
 }
 }
+
+#endif
