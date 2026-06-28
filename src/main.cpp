@@ -7,6 +7,7 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -139,12 +140,20 @@ namespace
 
             const std::size_t used_size{ static_cast<std::size_t>(written) + 1U };
             const std::uint32_t expected_hash{ hash_buffer(buffer, used_size) };
+#if !defined(__linux__)
+            const int expected_errno{ static_cast<int>(0x40U + worker_id) };
+            errno = expected_errno;
+#endif
 
             /* Keep this allocation live while the peer exercises malloc and
              * stdio. A one-tick time slice also permits preemption inside libc. */
             tx_thread_relinquish();
 
-            if (hash_buffer(buffer, used_size) != expected_hash) {
+            if (hash_buffer(buffer, used_size) != expected_hash
+#if !defined(__linux__)
+                || errno != expected_errno
+#endif
+            ) {
                 Error_Handler();
             }
 
