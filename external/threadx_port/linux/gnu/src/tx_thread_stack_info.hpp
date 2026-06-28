@@ -8,7 +8,7 @@
 #ifdef __cplusplus
 namespace tx::linux
 {
-    void refreshAllThreadsStackInfo();
+    void refresh_all_threads_stack_info();
 }
 
 extern "C" {

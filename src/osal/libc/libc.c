@@ -1,6 +1,6 @@
 #include "libc.h"
 
-#ifdef __linux__
+#if defined(HAL_PLATFORM_LINUX)
 
 void osal_newlib_initialize(void)
 {
@@ -9,7 +9,7 @@ void osal_newlib_initialize(void)
      * libc state without Newlib's retargeting hooks. */
 }
 
-#else // stm32
+#elif defined(HAL_PLATFORM_STM32)
 
 #include "hal/hal.hpp"
 

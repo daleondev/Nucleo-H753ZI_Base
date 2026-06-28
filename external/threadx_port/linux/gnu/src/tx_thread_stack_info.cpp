@@ -229,7 +229,7 @@ namespace tx::linux
         }
     }
 
-    void refreshAllThreadsStackInfo()
+    void refresh_all_threads_stack_info()
     {
         auto* first_thread{ _tx_thread_created_ptr };
         if (!first_thread || _tx_thread_created_count == 0U) {

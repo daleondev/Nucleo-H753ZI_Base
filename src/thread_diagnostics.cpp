@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-#if defined(HAL_COMPAT_LINUX)
+#ifdef HAL_PLATFORM_LINUX
 #include "tx_thread_stack_info.hpp"
 #endif
 
@@ -62,7 +62,7 @@ namespace thread_diagnostics
 
         void refresh_thread_stack_info(TX_THREAD* thread)
         {
-#if defined(TX_ENABLE_STACK_CHECKING) && !defined(HAL_COMPAT_LINUX)
+#if defined(TX_ENABLE_STACK_CHECKING) && !defined(HAL_PLATFORM_LINUX)
             if (thread == TX_NULL || thread == _tx_thread_current_ptr ||
                 thread->tx_thread_stack_ptr == TX_NULL || thread->tx_thread_stack_highest_ptr == TX_NULL) {
                 return;
@@ -199,8 +199,8 @@ namespace thread_diagnostics
 
     void print_all()
     {
-#if defined(HAL_COMPAT_LINUX)
-        Tx::Linux::refreshAllThreadsStackInfo();
+#ifdef HAL_PLATFORM_LINUX
+        tx::linux::refresh_all_threads_stack_info();
 #endif
 
         auto threads_info{ get_all_threads_information() };
