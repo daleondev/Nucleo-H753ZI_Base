@@ -14,6 +14,8 @@ target_include_directories(osal_libstdcxx
 )
 
 target_link_libraries(osal_libstdcxx
+    PRIVATE
+        hal
     PUBLIC
         threadx
         project_compiler_settings

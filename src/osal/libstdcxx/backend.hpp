@@ -85,6 +85,7 @@ namespace osal
         [[nodiscard]] std::uint64_t extend_tick_counter(std::uint64_t& epoch,
                                                         std::uint32_t& previous,
                                                         std::uint32_t current) noexcept;
+        [[nodiscard]] std::int64_t steady_time_nanoseconds() noexcept;
         [[nodiscard]] std::int64_t system_time_nanoseconds() noexcept;
         [[nodiscard]] ULONG duration_to_ticks(std::uint64_t nanoseconds) noexcept;
         void sleep_for(std::uint64_t nanoseconds) noexcept;

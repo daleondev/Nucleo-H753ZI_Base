@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <string>
 #include <string_view>
 
@@ -60,11 +61,26 @@ void MX_ETH_Init() { print_message("MX_ETH_Init"); }
 
 void MX_RTC_Init() { print_message("MX_RTC_Init"); }
 
+HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds)
+{
+    if (seconds_since_epoch == nullptr || nanoseconds == nullptr) {
+        return HAL_ERROR;
+    }
+
+    timespec current_time{};
+    if (clock_gettime(CLOCK_REALTIME, &current_time) != 0 || current_time.tv_sec < 0 ||
+        current_time.tv_nsec < 0) {
+        return HAL_ERROR;
+    }
+
+    *seconds_since_epoch = static_cast<int64_t>(current_time.tv_sec);
+    *nanoseconds = static_cast<uint32_t>(current_time.tv_nsec);
+    return HAL_OK;
+}
+
 void MX_TIM2_Init() { print_message("MX_TIM2_Init"); }
 
 void MX_RNG_Init() { print_message("MX_RNG_Init"); }
-
-HAL_StatusTypeDef platform_init_libc_locks() { return HAL_OK; }
 
 int32_t BSP_LED_Init(Led_TypeDef led)
 {

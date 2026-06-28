@@ -78,7 +78,7 @@ void MX_RTC_Init(void);
 void MX_TIM2_Init(void);
 void MX_RNG_Init(void);
 void MX_FDCAN1_Init(void);
-HAL_StatusTypeDef platform_init_libc_locks(void);
+HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds);
 
 int32_t BSP_LED_Init(Led_TypeDef led);
 int32_t BSP_LED_Toggle(Led_TypeDef led);

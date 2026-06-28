@@ -1,9 +1,7 @@
 #include "backend.hpp"
+#include "hal/hal.hpp"
 
 #include <algorithm>
-#if defined(__linux__)
-#include <chrono>
-#endif
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -37,6 +35,21 @@ namespace osal
             constexpr ULONG ROLLOVER_SAMPLE_TICKS{ 0x7FFFFFFFUL };
             constexpr ULONG MAX_FINITE_WAIT{ TX_WAIT_FOREVER - 1UL };
             constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
+
+            [[nodiscard]] std::int64_t ticks_to_nanoseconds(std::uint64_t ticks) noexcept
+            {
+                const std::uint64_t seconds{ ticks / TX_TIMER_TICKS_PER_SECOND };
+                const std::uint64_t remainder{ ticks % TX_TIMER_TICKS_PER_SECOND };
+                constexpr auto maximum{
+                    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
+                };
+                if (seconds > maximum / NANOSECONDS_PER_SECOND) {
+                    return std::numeric_limits<std::int64_t>::max();
+                }
+                return static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
+                                                 remainder * NANOSECONDS_PER_SECOND /
+                                                   TX_TIMER_TICKS_PER_SECOND);
+            }
 
             struct MutexImplementation
             {
@@ -90,14 +103,12 @@ namespace osal
             static_assert(OSAL_STD_THREAD_PRIORITY < 32U);
 
             TX_MUTEX initialization_mutex;
-            TX_MUTEX clock_mutex;
             TX_QUEUE cleanup_queue;
             TX_THREAD reaper_thread;
             TX_TIMER rollover_timer;
             alignas(STACK_ALIGNMENT) UCHAR reaper_stack[REAPER_STACK_SIZE];
             ULONG cleanup_queue_storage[CLEANUP_QUEUE_DEPTH];
             CHAR initialization_mutex_name[] = "std init";
-            CHAR clock_mutex_name[] = "std clock";
             CHAR cleanup_queue_name[] = "std cleanup";
             CHAR reaper_thread_name[] = "std reaper";
             CHAR rollover_timer_name[] = "std clock wrap";
@@ -114,6 +125,8 @@ namespace osal
             ThreadControl* registry_head{};
             std::uint32_t last_tick{};
             std::uint64_t tick_epoch{};
+            std::int64_t system_clock_epoch_nanoseconds{};
+            std::uint64_t system_clock_epoch_ticks{};
 
             [[nodiscard]] bool interrupt_context() noexcept
             {
@@ -1022,24 +1035,21 @@ namespace osal
             return epoch | current;
         }
 
+        std::int64_t steady_time_nanoseconds() noexcept
+        {
+            return ticks_to_nanoseconds(steady_ticks());
+        }
+
         std::int64_t system_time_nanoseconds() noexcept
         {
-#if defined(__linux__)
-            return std::chrono::duration_cast<std::chrono::nanoseconds>(
-                     std::chrono::system_clock::now().time_since_epoch())
-              .count();
-#else
-            const std::uint64_t ticks{ steady_ticks() };
-            const std::uint64_t seconds{ ticks / TX_TIMER_TICKS_PER_SECOND };
-            const std::uint64_t remainder{ ticks % TX_TIMER_TICKS_PER_SECOND };
-            constexpr auto maximum{ static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) };
-            if (seconds > maximum / NANOSECONDS_PER_SECOND) {
+            const std::int64_t elapsed{
+                ticks_to_nanoseconds(steady_ticks() - system_clock_epoch_ticks)
+            };
+            if (elapsed == std::numeric_limits<std::int64_t>::max() ||
+                system_clock_epoch_nanoseconds > std::numeric_limits<std::int64_t>::max() - elapsed) {
                 return std::numeric_limits<std::int64_t>::max();
             }
-            return static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
-                                             remainder * NANOSECONDS_PER_SECOND /
-                                               TX_TIMER_TICKS_PER_SECOND);
-#endif
+            return system_clock_epoch_nanoseconds + elapsed;
         }
 
         ULONG duration_to_ticks(std::uint64_t nanoseconds) noexcept
@@ -1070,8 +1080,12 @@ namespace osal
                                  (remainder * TX_TIMER_TICKS_PER_SECOND + NANOSECONDS_PER_SECOND - 1U) /
                                    NANOSECONDS_PER_SECOND };
             while (ticks != 0U) {
-                const ULONG chunk{ static_cast<ULONG>(std::min<std::uint64_t>(ticks, MAX_FINITE_WAIT)) };
-                if (tx_thread_sleep(chunk) != TX_SUCCESS) {
+                /* ThreadX timeouts are measured from the next timer boundary,
+                 * so N ticks can represent slightly less than N full periods.
+                 * Add one tick to satisfy sleep_for's no-early-return rule. */
+                constexpr ULONG maximum_chunk{ MAX_FINITE_WAIT - 1U };
+                const ULONG chunk{ static_cast<ULONG>(std::min<std::uint64_t>(ticks, maximum_chunk)) };
+                if (tx_thread_sleep(chunk + 1U) != TX_SUCCESS) {
                     fatal_error("tx_thread_sleep", TX_WAIT_ERROR);
                 }
                 ticks -= chunk;
@@ -1092,14 +1106,31 @@ namespace osal
             return TX_SUCCESS;
         }
 
+        detail::last_tick = static_cast<std::uint32_t>(tx_time_get());
+        detail::tick_epoch = 0U;
+
+        std::int64_t seconds_since_epoch{};
+        std::uint32_t nanoseconds{};
+        constexpr auto maximum_nanoseconds{
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
+        };
+        constexpr std::uint64_t maximum_seconds{
+            maximum_nanoseconds / detail::NANOSECONDS_PER_SECOND
+        };
+        if (platform_get_system_time(&seconds_since_epoch, &nanoseconds) != HAL_OK ||
+            seconds_since_epoch < 0 || nanoseconds >= detail::NANOSECONDS_PER_SECOND ||
+            static_cast<std::uint64_t>(seconds_since_epoch) > maximum_seconds ||
+            (static_cast<std::uint64_t>(seconds_since_epoch) == maximum_seconds &&
+             nanoseconds > maximum_nanoseconds % detail::NANOSECONDS_PER_SECOND)) {
+            return TX_NOT_DONE;
+        }
+        detail::system_clock_epoch_nanoseconds =
+          seconds_since_epoch * static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) + nanoseconds;
+        detail::system_clock_epoch_ticks = detail::steady_ticks();
+
         UINT status{ tx_mutex_create(
           &detail::initialization_mutex, detail::initialization_mutex_name, TX_INHERIT) };
         if (status != TX_SUCCESS) {
-            return status;
-        }
-        status = tx_mutex_create(&detail::clock_mutex, detail::clock_mutex_name, TX_INHERIT);
-        if (status != TX_SUCCESS) {
-            static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
         status = tx_queue_create(&detail::cleanup_queue,
@@ -1108,7 +1139,6 @@ namespace osal
                                  detail::cleanup_queue_storage,
                                  sizeof(detail::cleanup_queue_storage));
         if (status != TX_SUCCESS) {
-            static_cast<void>(tx_mutex_delete(&detail::clock_mutex));
             static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
@@ -1121,7 +1151,6 @@ namespace osal
                                  TX_AUTO_ACTIVATE);
         if (status != TX_SUCCESS) {
             static_cast<void>(tx_queue_delete(&detail::cleanup_queue));
-            static_cast<void>(tx_mutex_delete(&detail::clock_mutex));
             static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
@@ -1138,13 +1167,10 @@ namespace osal
         if (status != TX_SUCCESS) {
             static_cast<void>(tx_timer_delete(&detail::rollover_timer));
             static_cast<void>(tx_queue_delete(&detail::cleanup_queue));
-            static_cast<void>(tx_mutex_delete(&detail::clock_mutex));
             static_cast<void>(tx_mutex_delete(&detail::initialization_mutex));
             return status;
         }
 
-        detail::last_tick = static_cast<std::uint32_t>(tx_time_get());
-        detail::tick_epoch = 0U;
         detail::initialized = true;
         return TX_SUCCESS;
     }

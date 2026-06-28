@@ -92,6 +92,19 @@ namespace std
         _M_cond.wait(*lock.mutex());
     }
 
+    namespace chrono
+    {
+        steady_clock::time_point steady_clock::now() noexcept
+        {
+            return time_point{ duration{ osal::detail::steady_time_nanoseconds() } };
+        }
+
+        system_clock::time_point system_clock::now() noexcept
+        {
+            return time_point{ duration{ osal::detail::system_time_nanoseconds() } };
+        }
+    }
+
     namespace this_thread
     {
         void __sleep_for(chrono::seconds seconds, chrono::nanoseconds nanoseconds)
