@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 #ifdef __cplusplus
-namespace Tx::Linux
+namespace tx::linux
 {
     void refreshAllThreadsStackInfo();
 }

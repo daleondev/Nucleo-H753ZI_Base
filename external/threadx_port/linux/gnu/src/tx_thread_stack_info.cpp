@@ -12,7 +12,7 @@
 #include <ranges>
 #include <system_error>
 
-namespace Tx::Linux
+namespace tx::linux
 {
     namespace
     {
@@ -182,7 +182,7 @@ namespace Tx::Linux
                 return make_error_code(Error::PTR_ERROR);
             }
 
-            auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) };
+            auto stack_info{ tx::linux::StackInfo::of(thread_ptr) };
             if (!stack_info) {
                 return make_error_code(Error::PTR_ERROR);
             }
@@ -246,7 +246,7 @@ namespace Tx::Linux
 
 UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr)
 {
-    if (auto error{ Tx::Linux::prepare(thread_ptr) }; error) {
+    if (auto error{ tx::linux::prepare(thread_ptr) }; error) {
         return static_cast<UINT>(error->value());
     }
     return TX_SUCCESS;
@@ -254,7 +254,7 @@ UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr)
 
 VOID* _tx_linux_thread_stack_host_base(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         return stack_info->host_stack_base.get();
     }
     return nullptr;
@@ -262,27 +262,27 @@ VOID* _tx_linux_thread_stack_host_base(TX_THREAD* thread_ptr)
 
 size_t _tx_linux_thread_stack_host_size(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         return stack_info->host_stack_size;
     }
     return 0;
 }
 
-VOID _tx_linux_thread_stack_register(TX_THREAD* thread_ptr) { Tx::Linux::g_thread = thread_ptr; }
+VOID _tx_linux_thread_stack_register(TX_THREAD* thread_ptr) { tx::linux::g_thread = thread_ptr; }
 
-VOID _tx_linux_thread_stack_unregister(VOID) { Tx::Linux::g_thread = nullptr; }
+VOID _tx_linux_thread_stack_unregister(VOID) { tx::linux::g_thread = nullptr; }
 
 VOID _tx_linux_thread_stack_enable_signal_altstack(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         sigaltstack(&stack_info->signal_stack, nullptr);
     }
 }
 
 VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
-        stack_info->baseline_host_stack_ptr = static_cast<std::byte*>(Tx::Linux::stackPtr());
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
+        stack_info->baseline_host_stack_ptr = static_cast<std::byte*>(tx::linux::stackPtr());
         thread_ptr->tx_thread_stack_ptr = thread_ptr->tx_thread_stack_end;
 #ifdef TX_ENABLE_STACK_CHECKING
         thread_ptr->tx_thread_stack_highest_ptr = thread_ptr->tx_thread_stack_end;
@@ -292,18 +292,18 @@ VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr)
 
 VOID _tx_linux_thread_stack_capture_current(TX_THREAD* thread_ptr)
 {
-    (void)Tx::Linux::update(thread_ptr, Tx::Linux::stackPtr());
+    (void)tx::linux::update(thread_ptr, tx::linux::stackPtr());
 }
 
 VOID _tx_linux_thread_stack_capture_signal_context(VOID* context)
 {
-    if (!Tx::Linux::g_thread || !context) {
+    if (!tx::linux::g_thread || !context) {
         return;
     }
 
     auto ucontext{ static_cast<ucontext_t*>(context) };
     auto stack_ptr{ reinterpret_cast<void*>(ucontext->uc_mcontext.gregs[REG_RSP]) };
-    (void)Tx::Linux::update(Tx::Linux::g_thread, stack_ptr);
+    (void)tx::linux::update(tx::linux::g_thread, stack_ptr);
 }
 
 VOID _tx_linux_thread_stack_refresh(TX_THREAD* thread_ptr)
