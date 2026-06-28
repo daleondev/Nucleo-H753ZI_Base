@@ -42,9 +42,13 @@ namespace
             guard_failure("static initialization from interrupt", TX_CALLER_ERROR);
         }
 
-        if (tx_thread_identify() == TX_NULL) {
+        if (!runtime::detail::active()) {
             // Global constructors run before the scheduler and are inherently
             // single-threaded, so no ThreadX object is required yet.
+            return false;
+        }
+
+        if (tx_thread_identify() == TX_NULL) {
             return false;
         }
 

@@ -11,12 +11,17 @@
 
 // These names are prescribed by GNU ld's --wrap convention.
 // NOLINTNEXTLINE(bugprone-reserved-identifier)
-extern "C" int __real_main();
+extern "C" int __real_main(int argc, char** argv);
 extern "C" void runtime_application_define() __attribute__((weak));
 
 namespace
 {
-    constexpr std::size_t APPLICATION_THREAD_STACK_SIZE{ 4096U };
+#ifndef RUNTIME_APPLICATION_THREAD_STACK_SIZE
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define RUNTIME_APPLICATION_THREAD_STACK_SIZE 4096U
+#endif
+
+    constexpr std::size_t APPLICATION_THREAD_STACK_SIZE{ RUNTIME_APPLICATION_THREAD_STACK_SIZE };
     constexpr UINT APPLICATION_THREAD_PRIORITY{ 15U };
     constexpr std::size_t STACK_ALIGNMENT{ 8U };
     constexpr std::size_t APPLICATION_THREAD_NAME_SIZE{ sizeof("Application Thread") };
@@ -27,6 +32,8 @@ namespace
       std::array<std::byte, APPLICATION_THREAD_STACK_SIZE> application_thread_stack{};
     std::array<CHAR, APPLICATION_THREAD_NAME_SIZE> application_thread_name{ "Application Thread" };
     TX_THREAD application_thread;
+    int application_argc{};
+    char** application_argv{};
     // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
     auto assert_tx_call(UINT status) noexcept -> void
@@ -49,7 +56,7 @@ namespace
     auto application_thread_entry(ULONG input) noexcept -> void
     {
         static_cast<void>(input);
-        const int exit_status{ __real_main() };
+        const int exit_status{ __real_main(application_argc, application_argv) };
 
 #if defined(HAL_PLATFORM_LINUX)
         std::exit(exit_status);
@@ -62,8 +69,16 @@ namespace
 }
 
 // NOLINTNEXTLINE(bugprone-reserved-identifier)
-extern "C" int __wrap_main()
+extern "C" int __wrap_main(int argc, char** argv)
 {
+#if defined(HAL_PLATFORM_LINUX)
+    application_argc = argc;
+    application_argv = argv;
+#else
+    static_cast<void>(argc);
+    static_cast<void>(argv);
+#endif
+
     hal::initialize();
     tx_kernel_enter();
     Error_Handler();
