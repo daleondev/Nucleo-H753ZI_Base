@@ -1,5 +1,4 @@
 #include "hal/hal.hpp"
-#include "osal/libc/libc.h"
 #include "thread_diagnostics.hpp"
 
 #include <tx_api.h>
@@ -271,10 +270,6 @@ namespace
 extern "C" void tx_application_define(void* first_unused_memory)
 {
     static_cast<void>(first_unused_memory);
-
-    if (osal_init_libc() != 0) {
-        Error_Handler();
-    }
 
     assert_tx_call(tx_thread_stack_error_notify(thread_stack_error_handler));
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)

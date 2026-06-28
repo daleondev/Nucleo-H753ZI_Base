@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-int osal_init_libc(void);
+void osal_newlib_initialize(void);
 
 #ifdef __cplusplus
 }

@@ -141,10 +141,10 @@ static int create_lock(__lock_t* lock, CHAR* name)
     return 0;
 }
 
-int osal_init_libc(void)
+void osal_newlib_initialize(void)
 {
     if (libc_locks_ready) {
-        return 0;
+        return;
     }
 
     static_lock_definition_t static_locks[] = {
@@ -160,22 +160,21 @@ int osal_init_libc(void)
 
     for (size_t index = 0; index < sizeof(static_locks) / sizeof(static_locks[0]); ++index) {
         if (create_lock(static_locks[index].lock, static_locks[index].name) != 0) {
-            return 1;
+            libc_lock_failure();
         }
     }
 
     for (size_t index = 0; index < DYNAMIC_LOCK_COUNT; ++index) {
         if (create_lock(&dynamic_locks[index], dynamic_mutex_name) != 0) {
-            return 1;
+            libc_lock_failure();
         }
     }
 
     if (tx_mutex_create(&dynamic_pool_mutex, dynamic_pool_mutex_name, TX_INHERIT) != TX_SUCCESS) {
-        return 1;
+        libc_lock_failure();
     }
 
     libc_locks_ready = true;
-    return 0;
 }
 
 static void lock_dynamic_pool(void)

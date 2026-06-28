@@ -23,6 +23,7 @@ extern "C" {
 
 void osal_newlib_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
 void osal_newlib_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
+void osal_newlib_initialize(void);
 
 #ifdef __cplusplus
 }
@@ -32,6 +33,11 @@ void osal_newlib_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
 #define TX_THREAD_USER_EXTENSION struct _reent tx_thread_newlib_reent;
 #define TX_THREAD_CREATE_INTERNAL_EXTENSION(thread_ptr) \
     osal_newlib_thread_create(thread_ptr);
+
+/* ThreadX invokes this after kernel objects are initialized and before
+ * tx_application_define(), which is the first safe point for creating the
+ * mutexes used by Newlib. */
+#define TX_INITIALIZE_KERNEL_ENTER_EXTENSION osal_newlib_initialize();
 
 /* Newlib may free lazily allocated buffers while reclaiming a reentrancy
  * object. ThreadX invokes this hook with interrupts disabled, so restore the
