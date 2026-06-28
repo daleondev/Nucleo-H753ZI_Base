@@ -26,3 +26,11 @@ target_compile_definitions(osal_libstdcxx
         _GLIBCXX_HAVE_POSIX_SEMAPHORE=1
         _GLIBCXX_USE_SCHED_YIELD=1
 )
+
+# The ThreadX startup extension is the only direct reference to this runtime
+# hook. Keep its archive member even when the application does not use a
+# libstdc++ synchronization type directly.
+target_link_options(osal_libstdcxx
+    INTERFACE
+        LINKER:--undefined=osal_libstdcxx_initialize
+)

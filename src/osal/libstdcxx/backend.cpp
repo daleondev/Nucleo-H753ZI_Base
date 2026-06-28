@@ -1,6 +1,9 @@
 #include "backend.hpp"
 
 #include <algorithm>
+#if defined(__linux__)
+#include <chrono>
+#endif
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -1019,6 +1022,26 @@ namespace osal
             return epoch | current;
         }
 
+        std::int64_t system_time_nanoseconds() noexcept
+        {
+#if defined(__linux__)
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     std::chrono::system_clock::now().time_since_epoch())
+              .count();
+#else
+            const std::uint64_t ticks{ steady_ticks() };
+            const std::uint64_t seconds{ ticks / TX_TIMER_TICKS_PER_SECOND };
+            const std::uint64_t remainder{ ticks % TX_TIMER_TICKS_PER_SECOND };
+            constexpr auto maximum{ static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) };
+            if (seconds > maximum / NANOSECONDS_PER_SECOND) {
+                return std::numeric_limits<std::int64_t>::max();
+            }
+            return static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
+                                             remainder * NANOSECONDS_PER_SECOND /
+                                               TX_TIMER_TICKS_PER_SECOND);
+#endif
+        }
+
         ULONG duration_to_ticks(std::uint64_t nanoseconds) noexcept
         {
             if (nanoseconds == 0U) {
@@ -1124,6 +1147,13 @@ namespace osal
         detail::tick_epoch = 0U;
         detail::initialized = true;
         return TX_SUCCESS;
+    }
+}
+
+extern "C" void osal_libstdcxx_initialize(void)
+{
+    if (osal::initialize() != TX_SUCCESS) {
+        std::terminate();
     }
 }
 
