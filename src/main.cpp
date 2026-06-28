@@ -1,4 +1,5 @@
 #include "hal/hal.hpp"
+#include "osal/libc/libc.h"
 #include "thread_diagnostics.hpp"
 
 #include <tx_api.h>
@@ -56,10 +57,10 @@ namespace
 #endif
 
 #if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    alignas(STACK_ALIGNMENT) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE>
-      threadsafe_static_test_stack_0{};
-    alignas(STACK_ALIGNMENT) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE>
-      threadsafe_static_test_stack_1{};
+    alignas(STACK_ALIGNMENT)
+      std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_0{};
+    alignas(STACK_ALIGNMENT)
+      std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_1{};
     CHAR threadsafe_static_test_name_0[] = "static init test 0";
     CHAR threadsafe_static_test_name_1[] = "static init test 1";
     CHAR threadsafe_static_test_done_name[] = "static init done";
@@ -262,7 +263,7 @@ extern "C" void tx_application_define(void* first_unused_memory)
 {
     static_cast<void>(first_unused_memory);
 
-    if (platform_init_libc_locks() != HAL_OK) {
+    if (osal_init_libc() != 0) {
         Error_Handler();
     }
 

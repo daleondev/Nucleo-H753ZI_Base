@@ -1,5 +1,7 @@
 add_library(osal STATIC)
 
+add_subdirectory(libc)
+
 target_sources(osal
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Mutex.cpp
@@ -9,7 +11,7 @@ target_sources(osal
 
 target_link_libraries(osal
     PUBLIC
-        threadx
+        osal::libc
         project_compiler_settings
 )
 

@@ -13,7 +13,7 @@ extern "C" {
 
 void SystemClock_Config(void);
 void MPU_Config_User(void);
-HAL_StatusTypeDef platform_init_libc_locks(void);
+// HAL_StatusTypeDef platform_init_libc_locks(void);
 
 #ifdef __cplusplus
 }
