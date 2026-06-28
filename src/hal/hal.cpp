@@ -1,10 +1,11 @@
 #include "hal.hpp"
 
+#include <cstdint>
+
 #if defined(HAL_PLATFORM_LINUX)
 
 #include <array>
 #include <cassert>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -130,3 +131,97 @@ void Error_Handler()
 }
 
 #endif
+
+extern "C" HAL_StatusTypeDef platform_get_system_time(std::int64_t* seconds_since_epoch,
+                                                        std::uint32_t* nanoseconds)
+{
+#if defined(HAL_PLATFORM_LINUX)
+    if (seconds_since_epoch == nullptr || nanoseconds == nullptr) {
+        return HAL_ERROR;
+    }
+
+    timespec now{};
+    if (clock_gettime(CLOCK_REALTIME, &now) != 0 || now.tv_sec < 0) {
+        return HAL_ERROR;
+    }
+
+    *seconds_since_epoch = static_cast<std::int64_t>(now.tv_sec);
+    *nanoseconds = static_cast<std::uint32_t>(now.tv_nsec);
+    return HAL_OK;
+#else
+    static_cast<void>(seconds_since_epoch);
+    static_cast<void>(nanoseconds);
+    return HAL_ERROR;
+#endif
+}
+
+extern "C" HAL_StatusTypeDef
+  platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter)
+{
+#if defined(HAL_PLATFORM_LINUX)
+    if (counter == nullptr) {
+        return HAL_ERROR;
+    }
+
+    timespec now{};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0) {
+        return HAL_ERROR;
+    }
+
+    constexpr std::uint64_t nanoseconds_per_second{ 1'000'000'000ULL };
+    const auto seconds{ static_cast<std::uint64_t>(now.tv_sec) };
+    if (seconds > std::numeric_limits<std::uint64_t>::max() / nanoseconds_per_second) {
+        return HAL_ERROR;
+    }
+
+    counter->ticks = (seconds * nanoseconds_per_second) + static_cast<std::uint64_t>(now.tv_nsec);
+    counter->ticks_per_second = nanoseconds_per_second;
+    counter->modulus = 0U;
+    return HAL_OK;
+#else
+    static_cast<void>(counter);
+    return HAL_ERROR;
+#endif
+}
+
+namespace hal
+{
+    auto initialize() noexcept -> void
+    {
+        constexpr std::uint32_t com_baud_rate{ 115200U };
+
+        MPU_Config_User();
+        SCB_EnableICache();
+        SCB_EnableDCache();
+
+        if (HAL_Init() != HAL_OK) {
+            Error_Handler();
+        }
+
+        SystemClock_Config();
+
+        MX_GPIO_Init();
+        MX_ETH_Init();
+        MX_RTC_Init();
+        MX_TIM2_Init();
+        MX_RNG_Init();
+
+        if (BSP_LED_Init(LED_GREEN) != BSP_ERROR_NONE ||
+            BSP_LED_Init(LED_RED) != BSP_ERROR_NONE ||
+            BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI) != BSP_ERROR_NONE) {
+            Error_Handler();
+        }
+
+        COM_InitTypeDef bsp_com_init{};
+        bsp_com_init.BaudRate = com_baud_rate;
+        bsp_com_init.WordLength = COM_WORDLENGTH_8B;
+        bsp_com_init.StopBits = COM_STOPBITS_1;
+        bsp_com_init.Parity = COM_PARITY_NONE;
+        bsp_com_init.HwFlowCtl = COM_HWCONTROL_NONE;
+
+        if (BSP_COM_Init(COM1, &bsp_com_init) != BSP_ERROR_NONE ||
+            HAL_TIM_Base_Start(&htim2) != HAL_OK) {
+            Error_Handler();
+        }
+    }
+}

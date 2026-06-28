@@ -1,17 +1,42 @@
-#include "timer.hpp"
+#include "hal/drivers/factory/timer.hpp"
 
-#include "impl/stm32/Timer.hpp"
+#include "hal/drivers/impl/stm32/Timer.hpp"
+#include "hal/hal.hpp"
 
-#include "tim.h"
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <memory>
 
 namespace hal::timer
 {
     namespace
     {
-        static const std::map<size_t, TIM_HandleTypeDef*, std::shared_ptr<Timer>> g_instances{
-            { 2UZ, &htim2, nullptr }
-        };
+        constexpr std::size_t TIMER_2_INDEX{ 2U };
+
+        [[nodiscard]] auto timer2_input_frequency_hz() noexcept -> std::uint32_t
+        {
+            RCC_ClkInitTypeDef clock_configuration{};
+            std::uint32_t flash_latency{};
+            HAL_RCC_GetClockConfig(&clock_configuration, &flash_latency);
+
+            std::uint64_t frequency{ HAL_RCC_GetPCLK1Freq() };
+            if (clock_configuration.APB1CLKDivider != RCC_HCLK_DIV1) {
+                frequency *= 2U;
+            }
+            return static_cast<std::uint32_t>(
+              std::min<std::uint64_t>(frequency, std::numeric_limits<std::uint32_t>::max()));
+        }
     }
 
-    // std::shared_ptr<ITimer> create(size_t index) { auto }
+    auto create(std::size_t index) -> std::shared_ptr<ITimer>
+    {
+        if (index != TIMER_2_INDEX) {
+            return {};
+        }
+
+        static auto timer{ std::make_shared<Timer>(
+          Timer::Configuration{ .handle = htim2, .input_frequency_hz = timer2_input_frequency_hz() }) };
+        return timer;
+    }
 }

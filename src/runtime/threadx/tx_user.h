@@ -74,12 +74,12 @@ extern void runtime_libc_initialize(void);
     runtime_libstdcxx_thread_started(thread_ptr);
 
 /* ThreadX invokes this after kernel objects are initialized and before
- * tx_application_define(), which is the first safe point for creating
- * runtime objects. */
+ * tx_application_define(). The C++ runtime is initialized from
+ * tx_application_define() after the application thread is created so that
+ * the user's main thread remains the first ThreadX thread. */
 #define TX_INITIALIZE_KERNEL_ENTER_EXTENSION \
     do {                                       \
         RUNTIME_THREADX_LIBC_INITIALIZE();     \
-        runtime_libstdcxx_initialize();        \
     } while (0);
 
 #if defined(__ARM_EABI__)

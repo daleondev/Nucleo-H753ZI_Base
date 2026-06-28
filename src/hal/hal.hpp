@@ -27,6 +27,8 @@ typedef enum
 {
     HAL_OK = 0x00U,
     HAL_ERROR = 0x01U,
+    HAL_BUSY = 0x02U,
+    HAL_TIMEOUT = 0x03U,
 } HAL_StatusTypeDef;
 
 typedef struct
@@ -105,6 +107,9 @@ void Error_Handler(void);
 
 #endif
 
+// These declarations are also consumed by C translation units and
+// intentionally expose writable output pointers.
+// NOLINTBEGIN(modernize-use-using,readability-non-const-parameter)
 typedef struct
 {
     uint64_t ticks;
@@ -112,19 +117,15 @@ typedef struct
     uint64_t modulus;
 } PlatformHighResolutionCounter;
 
-inline HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds)
-{
-    (void)seconds_since_epoch;
-    (void)nanoseconds;
-    return HAL_OK;
-}
-
-inline HAL_StatusTypeDef platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter)
-{
-    (void)counter;
-    return HAL_OK;
-}
+HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds);
+HAL_StatusTypeDef platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter);
+// NOLINTEND(modernize-use-using,readability-non-const-parameter)
 
 #ifdef __cplusplus
+}
+
+namespace hal
+{
+    auto initialize() noexcept -> void;
 }
 #endif

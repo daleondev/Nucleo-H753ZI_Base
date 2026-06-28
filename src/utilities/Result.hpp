@@ -2,6 +2,7 @@
 
 #include <expected>
 #include <system_error>
+#include <utility>
 
 namespace util
 {
@@ -10,25 +11,21 @@ namespace util
 
     namespace result
     {
-        template<typename T>
-            requires(std::is_void_v<T>)
-        inline constexpr auto success() noexcept -> Result<T>
+        constexpr auto success() noexcept -> Result<>
         {
             return {};
         }
 
         template<typename T>
-            requires(!std::is_void_v<T>)
-        inline constexpr auto success(const T& value) noexcept -> Result<T>
+        constexpr auto success(T value) -> Result<T>
         {
-            return value;
+            return std::move(value);
         }
 
-        template<typename T>
-            requires(!std::is_void_v<T>)
-        inline constexpr auto fail(std::error_code err) noexcept -> Result<T>
+        template<typename T = void>
+        constexpr auto fail(std::error_code error) noexcept -> Result<T>
         {
-            return std::unexpected(std::move(err));
+            return std::unexpected(error);
         }
     }
 }

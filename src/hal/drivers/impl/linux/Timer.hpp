@@ -1,10 +1,12 @@
 #pragma once
 
-#include "hal/hal.hpp"
 #include "hal/drivers/itf/ITimer.hpp"
 
-#include <array>
-#include <cstddef>
+#include <pthread.h>
+
+#include <chrono>
+#include <cstdint>
+#include <memory>
 
 namespace hal
 {
@@ -13,11 +15,12 @@ namespace hal
       public:
         struct Configuration
         {
-            TIM_HandleTypeDef& handle;
             std::uint32_t input_frequency_hz;
+            Tick prescaler;
+            Tick auto_reload;
         };
 
-        explicit Timer(Configuration configuration);
+        explicit Timer(Configuration configuration) noexcept;
         ~Timer() override;
 
         Timer(const Timer&) = delete;
@@ -48,21 +51,33 @@ namespace hal
 
         [[nodiscard]] auto getElapsedTime() const noexcept -> std::chrono::nanoseconds override;
 
-        static auto dispatchPeriodElapsed(TIM_HandleTypeDef* handle) noexcept -> void;
-
       private:
         [[nodiscard]] auto durationToTicksImpl(std::chrono::nanoseconds duration) const noexcept
           -> Tick override;
-
         auto setPeriodImpl(std::chrono::nanoseconds duration) noexcept -> void override;
-
         auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void override;
 
-        TIM_HandleTypeDef& m_handle;
-        std::uint32_t m_timerInputHz;
-        PeriodElapsedCallback m_periodElapsedCallback;
+        [[nodiscard]] auto counterAt(std::uint64_t monotonic_nanoseconds) const noexcept -> Tick;
+        [[nodiscard]] auto durationToTicksUnlocked(std::chrono::nanoseconds duration) const noexcept
+          -> Tick;
+        [[nodiscard]] auto getTickFrequencyHzUnlocked() const noexcept -> std::uint32_t;
+        [[nodiscard]] auto periodNanosecondsUnlocked() const noexcept -> std::uint64_t;
+        auto captureCounter(std::uint64_t monotonic_nanoseconds) noexcept -> void;
+        auto notifyWorker() noexcept -> void;
+        auto workerLoop() noexcept -> void;
+        static auto workerEntry(void* context) noexcept -> void*;
 
-        static constexpr std::size_t MAX_TIMER_INSTANCES{ 4U };
-        inline static std::array<Timer*, MAX_TIMER_INSTANCES> s_registry{};
+        std::uint32_t m_timerInputHz;
+        Tick m_prescaler;
+        Tick m_autoReload;
+        Tick m_counter{};
+        std::uint64_t m_startedAtNanoseconds{};
+        bool m_running{};
+        bool m_interruptEnabled{};
+        bool m_shuttingDown{};
+        mutable pthread_mutex_t m_mutex{};
+        pthread_cond_t m_condition{};
+        pthread_t m_worker{};
+        std::shared_ptr<PeriodElapsedCallback> m_periodElapsedCallback;
     };
 }

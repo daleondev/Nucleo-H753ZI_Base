@@ -1,0 +1,97 @@
+#include "hal/hal.hpp"
+
+#include <tx_api.h>
+#include <tx_thread.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+
+// These names are prescribed by GNU ld's --wrap convention.
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
+extern "C" int __real_main();
+extern "C" void runtime_application_define() __attribute__((weak));
+
+namespace
+{
+    constexpr std::size_t APPLICATION_THREAD_STACK_SIZE{ 4096U };
+    constexpr UINT APPLICATION_THREAD_PRIORITY{ 15U };
+    constexpr std::size_t STACK_ALIGNMENT{ 8U };
+    constexpr std::size_t APPLICATION_THREAD_NAME_SIZE{ sizeof("Application Thread") };
+
+    // ThreadX owns and mutates this statically allocated control block and stack.
+    // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
+    alignas(STACK_ALIGNMENT)
+      std::array<std::byte, APPLICATION_THREAD_STACK_SIZE> application_thread_stack{};
+    std::array<CHAR, APPLICATION_THREAD_NAME_SIZE> application_thread_name{ "Application Thread" };
+    TX_THREAD application_thread;
+    // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+
+    auto assert_tx_call(UINT status) noexcept -> void
+    {
+        if (status != TX_SUCCESS) {
+            Error_Handler();
+        }
+    }
+
+    auto thread_stack_error_handler(TX_THREAD* thread) noexcept -> void
+    {
+        const auto* thread_name = thread != TX_NULL ? thread->tx_thread_name : "Unknown";
+        const std::string message{ std::string{ "Thread " } + thread_name +
+                                   " stack overflow detected\r\n" };
+        std::fputs(message.c_str(), stderr);
+        std::fflush(stderr);
+        Error_Handler();
+    }
+
+    auto application_thread_entry(ULONG input) noexcept -> void
+    {
+        static_cast<void>(input);
+        const int exit_status{ __real_main() };
+
+#if defined(HAL_PLATFORM_LINUX)
+        std::exit(exit_status);
+#else
+        if (exit_status != EXIT_SUCCESS) {
+            Error_Handler();
+        }
+#endif
+    }
+}
+
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
+extern "C" int __wrap_main()
+{
+    hal::initialize();
+    tx_kernel_enter();
+    Error_Handler();
+    return EXIT_FAILURE;
+}
+
+extern "C" void tx_application_define(void* first_unused_memory)
+{
+    static_cast<void>(first_unused_memory);
+
+    assert_tx_call(tx_thread_stack_error_notify(thread_stack_error_handler));
+
+    // This must remain the first ThreadX thread created by the application.
+    assert_tx_call(tx_thread_create(&application_thread,
+                                    application_thread_name.data(),
+                                    application_thread_entry,
+                                    0U,
+                                    application_thread_stack.data(),
+                                    static_cast<ULONG>(application_thread_stack.size()),
+                                    APPLICATION_THREAD_PRIORITY,
+                                    APPLICATION_THREAD_PRIORITY,
+                                    TX_NO_TIME_SLICE,
+                                    TX_AUTO_START));
+
+    // This creates the runtime's reaper thread, after the application thread.
+    runtime_libstdcxx_initialize();
+
+    if (runtime_application_define != nullptr) {
+        runtime_application_define();
+    }
+}

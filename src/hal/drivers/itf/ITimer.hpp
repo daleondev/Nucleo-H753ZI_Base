@@ -6,6 +6,8 @@
 #include <concepts>
 #include <cstdint>
 #include <functional>
+#include <type_traits>
+#include <utility>
 
 namespace hal
 {
@@ -23,14 +25,20 @@ namespace hal
     {
       public:
         using Tick = std::uint32_t;
+        using PeriodElapsedCallback = std::move_only_function<void() noexcept>;
 
         virtual ~ITimer() = default;
 
-        [[nodiscard]] virtual auto start() noexcept -> util::Result = 0;
-        [[nodiscard]] virtual auto stop() noexcept -> util::Result = 0;
+        ITimer(const ITimer&) = delete;
+        ITimer& operator=(const ITimer&) = delete;
+        ITimer(ITimer&&) = delete;
+        ITimer& operator=(ITimer&&) = delete;
 
-        [[nodiscard]] virtual auto startIt() noexcept -> util::Result = 0;
-        [[nodiscard]] virtual auto stopIt() noexcept -> util::Result = 0;
+        [[nodiscard]] virtual auto start() noexcept -> util::Result<> = 0;
+        [[nodiscard]] virtual auto stop() noexcept -> util::Result<> = 0;
+
+        [[nodiscard]] virtual auto startIt() noexcept -> util::Result<> = 0;
+        [[nodiscard]] virtual auto stopIt() noexcept -> util::Result<> = 0;
 
         [[nodiscard]] virtual auto getCounter() const noexcept -> Tick = 0;
         virtual auto setCounter(Tick value) noexcept -> void = 0;
@@ -54,7 +62,7 @@ namespace hal
         }
 
         template<typename Rep, typename Period>
-        auto setPeriod(std::chrono::nanoseconds duration) noexcept -> void
+        auto setPeriod(std::chrono::duration<Rep, Period> duration) noexcept -> void
         {
             setPeriodImpl(std::chrono::duration_cast<std::chrono::nanoseconds>(duration));
         }
@@ -63,22 +71,27 @@ namespace hal
 
         template<typename Func, typename... Args>
             requires detail::NothrowPeriodElapsedCallback<Func, Args...>
-        auto setPeriodElapsedCallback(Func&& callback, Args&&... args) const noexcept -> void
+        auto setPeriodElapsedCallback(Func&& callback, Args&&... args) -> void
         {
-            setPeriodElapsedCallbackImpl(
+            PeriodElapsedCallback bound_callback{
               [cb = std::forward<Func>(callback),
                ... bound_args = std::forward<Args>(args)]() mutable noexcept -> void {
-                std::invoke(cb, bound_args...);
-            });
+                  std::invoke(cb, bound_args...);
+              }
+            };
+            setPeriodElapsedCallbackImpl(std::move(bound_callback));
         }
 
+        auto clearPeriodElapsedCallback() noexcept -> void { setPeriodElapsedCallbackImpl({}); }
+
       protected:
+        ITimer() = default;
+
         [[nodiscard]] virtual auto durationToTicksImpl(std::chrono::nanoseconds duration) const noexcept
           -> Tick = 0;
 
         virtual auto setPeriodImpl(std::chrono::nanoseconds duration) noexcept -> void = 0;
 
-        using IsrCallback = void (*)() noexcept;
-        virtual auto setPeriodElapsedCallbackImpl(IsrCallback callback) noexcept -> void = 0;
+        virtual auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void = 0;
     };
 }

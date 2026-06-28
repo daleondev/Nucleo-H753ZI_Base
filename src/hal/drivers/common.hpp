@@ -11,12 +11,12 @@ namespace hal
 {
     enum class HalError : std::uint8_t
     {
-        Error,
-        Busy,
-        Timeout
+        Error = 1U,
+        Busy = 2U,
+        Timeout = 3U
     };
 
-    class HalErrorCategory : public std::error_category
+    class HalErrorCategory final : public std::error_category
     {
       public:
         const char* name() const noexcept override { return "HalError"; }
@@ -34,7 +34,6 @@ namespace hal
                 default:
                     return "Unknown";
             }
-            std::unreachable();
         }
     };
 
@@ -46,14 +45,19 @@ namespace hal
 
     [[nodiscard]] inline auto make_error_code(HalError err) noexcept -> std::error_code
     {
-        return std::error_code(static_cast<int>(err), hal_error_category());
+        return { static_cast<int>(err), hal_error_category() };
     }
 
-    [[nodiscard]] inline auto make_result(HAL_StatusTypeDef status) noexcept -> util::Result
+    [[nodiscard]] inline auto make_result(HAL_StatusTypeDef status) noexcept -> util::Result<>
     {
         if (status != HAL_OK) {
-            return util::result::fail(make_error_code(static_cast<HalError>(status)));
+            return std::unexpected(make_error_code(static_cast<HalError>(status)));
         }
-        return util::result::success();
+        return {};
+    }
+
+    [[nodiscard]] inline auto make_error_result(HalError error) noexcept -> util::Result<>
+    {
+        return std::unexpected(make_error_code(error));
     }
 }
