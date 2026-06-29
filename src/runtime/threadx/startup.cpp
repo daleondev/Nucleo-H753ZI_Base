@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <string>
 
 // These names are prescribed by GNU ld's --wrap convention.
@@ -56,7 +57,14 @@ namespace
     auto application_thread_entry(ULONG input) noexcept -> void
     {
         static_cast<void>(input);
-        const int exit_status{ __real_main(application_argc, application_argv) };
+        int exit_status{};
+        try {
+            exit_status = __real_main(application_argc, application_argv);
+        }
+        catch (...) {
+            // Do not permit user exceptions to cross the ThreadX entry frame.
+            std::terminate();
+        }
 
 #if defined(HAL_PLATFORM_LINUX)
         std::exit(exit_status);

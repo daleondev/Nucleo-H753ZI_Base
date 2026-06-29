@@ -20,10 +20,18 @@ static_assert(std::is_same_v<std::thread::native_handle_type, TX_THREAD*>);
 
 namespace
 {
-    void* run_thread_state(void* state_pointer)
+    auto run_thread_state(void* state_pointer) noexcept -> void*
     {
         std::unique_ptr<std::thread::_State> state{ static_cast<std::thread::_State*>(state_pointer) };
-        state->_M_run();
+        try {
+            state->_M_run();
+        }
+        catch (...) {
+            // The C++ standard requires an exception escaping a thread's
+            // initial function to terminate the process. Never unwind through
+            // the ThreadX C entry frame.
+            std::terminate();
+        }
         return nullptr;
     }
 }
