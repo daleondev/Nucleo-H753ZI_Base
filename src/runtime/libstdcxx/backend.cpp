@@ -4,6 +4,7 @@
 #include "hal/hal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -46,23 +47,21 @@ namespace runtime
                 std::uint64_t ticks{};
                 std::uint64_t ticks_per_second{};
                 std::uint64_t modulus{};
+                std::uint32_t state_version{};
             };
 
             [[nodiscard]] std::int64_t ticks_to_nanoseconds(std::uint64_t ticks) noexcept
             {
                 const std::uint64_t seconds{ ticks / TX_TIMER_TICKS_PER_SECOND };
                 const std::uint64_t remainder{ ticks % TX_TIMER_TICKS_PER_SECOND };
-                constexpr auto maximum{
-                    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-                };
-                const std::uint64_t fractional_nanoseconds{
-                    remainder * NANOSECONDS_PER_SECOND / TX_TIMER_TICKS_PER_SECOND
-                };
+                constexpr auto maximum{ static_cast<std::uint64_t>(
+                  std::numeric_limits<std::int64_t>::max()) };
+                const std::uint64_t fractional_nanoseconds{ remainder * NANOSECONDS_PER_SECOND /
+                                                            TX_TIMER_TICKS_PER_SECOND };
                 if (seconds > (maximum - fractional_nanoseconds) / NANOSECONDS_PER_SECOND) {
                     return std::numeric_limits<std::int64_t>::max();
                 }
-                return static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
-                                                 fractional_nanoseconds);
+                return static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND + fractional_nanoseconds);
             }
 
             struct MutexImplementation
@@ -83,12 +82,6 @@ namespace runtime
                 TX_MUTEX mutex{};
                 Waiter* first{};
                 Waiter* last{};
-            };
-
-            struct OnceImplementation
-            {
-                TX_MUTEX mutex{};
-                unsigned int state{};
             };
 
             struct SemaphoreImplementation
@@ -136,7 +129,6 @@ namespace runtime
             CHAR mutex_name[] = "std mutex";
             CHAR condition_mutex_name[] = "std condition";
             CHAR waiter_semaphore_name[] = "std cv waiter";
-            CHAR once_mutex_name[] = "std once";
             CHAR semaphore_name[] = "std semaphore";
             CHAR completion_name[] = "std completion";
             CHAR lifecycle_mutex_name[] = "std lifecycle";
@@ -149,10 +141,11 @@ namespace runtime
             std::uint64_t tick_epoch{};
             std::int64_t system_clock_epoch_nanoseconds{};
             std::uint64_t system_clock_epoch_ticks{};
+            std::atomic<std::int64_t> last_system_time_nanoseconds{};
             std::shared_ptr<hal::ITimer> high_resolution_timer{};
             HighResolutionCounter high_resolution_counter_epoch{};
             bool system_clock_epoch_available{};
-            bool high_resolution_counter_available{};
+            std::atomic_bool high_resolution_counter_available{};
 
             constexpr unsigned int KEY_INDEX_BITS{ 8U };
             constexpr unsigned int KEY_INDEX_MASK{ (1U << KEY_INDEX_BITS) - 1U };
@@ -165,49 +158,46 @@ namespace runtime
                 return (generation << KEY_INDEX_BITS) | static_cast<unsigned int>(index);
             }
 
-            [[nodiscard]] std::size_t key_index(KeyHandle key) noexcept
-            {
-                return key & KEY_INDEX_MASK;
-            }
+            [[nodiscard]] std::size_t key_index(KeyHandle key) noexcept { return key & KEY_INDEX_MASK; }
 
             [[nodiscard]] unsigned int key_generation(KeyHandle key) noexcept
             {
                 return key >> KEY_INDEX_BITS;
             }
 
-            [[nodiscard]] bool valid_high_resolution_counter(
-              const HighResolutionCounter& counter) noexcept
+            [[nodiscard]] bool valid_high_resolution_counter(const HighResolutionCounter& counter) noexcept
             {
-                return counter.ticks_per_second != 0U &&
-                       counter.ticks_per_second <= NANOSECONDS_PER_SECOND &&
+                return counter.ticks_per_second != 0U && counter.ticks_per_second <= NANOSECONDS_PER_SECOND &&
                        (counter.modulus == 0U || counter.ticks < counter.modulus);
             }
 
-            [[nodiscard]] bool read_high_resolution_counter(
-              HighResolutionCounter& counter) noexcept
+            [[nodiscard]] bool read_high_resolution_counter(HighResolutionCounter& counter) noexcept
             {
                 if (!high_resolution_timer) {
                     return false;
                 }
 
+                const std::uint32_t state_version{ high_resolution_timer->getStateVersion() };
+                if (!high_resolution_timer->isRunning()) {
+                    return false;
+                }
                 counter.ticks = high_resolution_timer->getCounter();
                 counter.ticks_per_second = high_resolution_timer->getTickFrequencyHz();
-                counter.modulus =
-                  static_cast<std::uint64_t>(high_resolution_timer->getAutoReload()) + 1U;
-                return valid_high_resolution_counter(counter);
+                counter.modulus = static_cast<std::uint64_t>(high_resolution_timer->getAutoReload()) + 1U;
+                counter.state_version = state_version;
+                return high_resolution_timer->isRunning() &&
+                       high_resolution_timer->getStateVersion() == state_version &&
+                       valid_high_resolution_counter(counter);
             }
 
             [[nodiscard]] bool thread_ticks_to_counter_ticks(std::uint64_t ticks,
-                                                              std::uint64_t frequency,
-                                                              std::uint64_t& result) noexcept
+                                                             std::uint64_t frequency,
+                                                             std::uint64_t& result) noexcept
             {
                 const std::uint64_t seconds{ ticks / TX_TIMER_TICKS_PER_SECOND };
                 const std::uint64_t remainder{ ticks % TX_TIMER_TICKS_PER_SECOND };
-                const std::uint64_t fractional_ticks{
-                    remainder * frequency / TX_TIMER_TICKS_PER_SECOND
-                };
-                if (seconds >
-                    (std::numeric_limits<std::uint64_t>::max() - fractional_ticks) / frequency) {
+                const std::uint64_t fractional_ticks{ remainder * frequency / TX_TIMER_TICKS_PER_SECOND };
+                if (seconds > (std::numeric_limits<std::uint64_t>::max() - fractional_ticks) / frequency) {
                     return false;
                 }
                 result = seconds * frequency + fractional_ticks;
@@ -215,36 +205,34 @@ namespace runtime
             }
 
             [[nodiscard]] bool counter_ticks_to_nanoseconds(std::uint64_t ticks,
-                                                             std::uint64_t frequency,
-                                                             std::int64_t& result) noexcept
+                                                            std::uint64_t frequency,
+                                                            std::int64_t& result) noexcept
             {
                 const std::uint64_t seconds{ ticks / frequency };
                 const std::uint64_t remainder{ ticks % frequency };
-                constexpr auto maximum{
-                    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-                };
-                const std::uint64_t fractional_nanoseconds{
-                    remainder * NANOSECONDS_PER_SECOND / frequency
-                };
+                constexpr auto maximum{ static_cast<std::uint64_t>(
+                  std::numeric_limits<std::int64_t>::max()) };
+                const std::uint64_t fractional_nanoseconds{ remainder * NANOSECONDS_PER_SECOND / frequency };
                 if (seconds > (maximum - fractional_nanoseconds) / NANOSECONDS_PER_SECOND) {
                     return false;
                 }
-                result = static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND +
-                                                   fractional_nanoseconds);
+                result = static_cast<std::int64_t>(seconds * NANOSECONDS_PER_SECOND + fractional_nanoseconds);
                 return true;
             }
 
             [[nodiscard]] bool high_resolution_elapsed_nanoseconds(std::uint64_t current_thread_ticks,
-                                                                    std::int64_t& result) noexcept
+                                                                   std::int64_t& result) noexcept
             {
-                if (!high_resolution_counter_available) {
+                if (!high_resolution_counter_available.load(std::memory_order_relaxed)) {
                     return false;
                 }
 
                 HighResolutionCounter current{};
                 if (!read_high_resolution_counter(current) ||
+                    current.state_version != high_resolution_counter_epoch.state_version ||
                     current.ticks_per_second != high_resolution_counter_epoch.ticks_per_second ||
                     current.modulus != high_resolution_counter_epoch.modulus) {
+                    high_resolution_counter_available.store(false, std::memory_order_relaxed);
                     return false;
                 }
 
@@ -284,15 +272,23 @@ namespace runtime
                     }
 
                     if (wraps >
-                        (std::numeric_limits<std::uint64_t>::max() - modular_elapsed) /
-                          current.modulus) {
+                        (std::numeric_limits<std::uint64_t>::max() - modular_elapsed) / current.modulus) {
                         return false;
                     }
                     elapsed_counter_ticks = modular_elapsed + wraps * current.modulus;
                 }
 
-                return counter_ticks_to_nanoseconds(
-                  elapsed_counter_ticks, current.ticks_per_second, result);
+                return counter_ticks_to_nanoseconds(elapsed_counter_ticks, current.ticks_per_second, result);
+            }
+
+            [[nodiscard]] std::int64_t publish_system_time(std::int64_t candidate) noexcept
+            {
+                std::int64_t previous{ last_system_time_nanoseconds.load(std::memory_order_relaxed) };
+                while (candidate > previous &&
+                       !last_system_time_nanoseconds.compare_exchange_weak(
+                         previous, candidate, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                }
+                return candidate > previous ? candidate : previous;
             }
 
             [[nodiscard]] bool interrupt_context() noexcept
@@ -1089,14 +1085,16 @@ namespace runtime
                       deadline, [&](ULONG ticks) { return tx_semaphore_get(&waiter.semaphore, ticks); });
                 }
 
-                if (wait_status == ETIMEDOUT) {
+                if (wait_status != 0) {
                     raw_mutex_get(&condition_implementation->mutex);
                     if (waiter.linked) {
                         remove_waiter(condition_implementation, &waiter);
                     }
                     else {
-                        wait_status =
-                          tx_semaphore_get(&waiter.semaphore, TX_NO_WAIT) == TX_SUCCESS ? 0 : EINVAL;
+                        const UINT notification_status{ tx_semaphore_get(&waiter.semaphore, TX_NO_WAIT) };
+                        if (notification_status == TX_SUCCESS) {
+                            wait_status = 0;
+                        }
                     }
                     raw_mutex_put(&condition_implementation->mutex);
                 }
@@ -1172,48 +1170,29 @@ namespace runtime
                 return context_status != 0 ? context_status : EINVAL;
             }
 
-            if (once_control->implementation == nullptr) {
-                raw_mutex_get(&initialization_mutex);
-                if (once_control->implementation == nullptr) {
-                    auto* implementation{ new (std::nothrow) OnceImplementation{} };
-                    if (implementation != nullptr &&
-                        tx_mutex_create(&implementation->mutex, once_mutex_name, TX_INHERIT) == TX_SUCCESS) {
-                        once_control->implementation = implementation;
-                    }
-                    else {
-                        delete implementation;
-                    }
-                }
-                raw_mutex_put(&initialization_mutex);
-            }
-            auto* implementation{ static_cast<OnceImplementation*>(once_control->implementation) };
-            if (implementation == nullptr) {
-                return ENOMEM;
-            }
-
             while (true) {
-                raw_mutex_get(&implementation->mutex);
-                if (implementation->state == 2U) {
-                    raw_mutex_put(&implementation->mutex);
+                raw_mutex_get(&initialization_mutex);
+                if (once_control->state == 2U) {
+                    raw_mutex_put(&initialization_mutex);
                     return 0;
                 }
-                if (implementation->state == 0U) {
-                    implementation->state = 1U;
-                    raw_mutex_put(&implementation->mutex);
+                if (once_control->state == 0U) {
+                    once_control->state = 1U;
+                    raw_mutex_put(&initialization_mutex);
                     try {
                         function();
-                        raw_mutex_get(&implementation->mutex);
-                        implementation->state = 2U;
-                        raw_mutex_put(&implementation->mutex);
+                        raw_mutex_get(&initialization_mutex);
+                        once_control->state = 2U;
+                        raw_mutex_put(&initialization_mutex);
                         return 0;
                     } catch (...) {
-                        raw_mutex_get(&implementation->mutex);
-                        implementation->state = 0U;
-                        raw_mutex_put(&implementation->mutex);
+                        raw_mutex_get(&initialization_mutex);
+                        once_control->state = 0U;
+                        raw_mutex_put(&initialization_mutex);
                         throw;
                     }
                 }
-                raw_mutex_put(&implementation->mutex);
+                raw_mutex_put(&initialization_mutex);
                 tx_thread_sleep(1U);
             }
         }
@@ -1319,16 +1298,13 @@ namespace runtime
             return epoch | current;
         }
 
-        std::int64_t steady_time_nanoseconds() noexcept
-        {
-            return ticks_to_nanoseconds(steady_ticks());
-        }
+        std::int64_t steady_time_nanoseconds() noexcept { return ticks_to_nanoseconds(steady_ticks()); }
 
         std::int64_t system_time_nanoseconds() noexcept
         {
             const std::uint64_t current_ticks{ steady_ticks() };
             if (!system_clock_epoch_available) {
-                return ticks_to_nanoseconds(current_ticks);
+                return publish_system_time(ticks_to_nanoseconds(current_ticks));
             }
 
             std::int64_t elapsed{};
@@ -1337,9 +1313,9 @@ namespace runtime
             }
             if (elapsed == std::numeric_limits<std::int64_t>::max() ||
                 system_clock_epoch_nanoseconds > std::numeric_limits<std::int64_t>::max() - elapsed) {
-                return std::numeric_limits<std::int64_t>::max();
+                return publish_system_time(std::numeric_limits<std::int64_t>::max());
             }
-            return system_clock_epoch_nanoseconds + elapsed;
+            return publish_system_time(system_clock_epoch_nanoseconds + elapsed);
         }
 
         ULONG duration_to_ticks(std::uint64_t nanoseconds) noexcept
@@ -1410,29 +1386,22 @@ namespace runtime
                 realtime_clock_available = true;
             }
         }
-        constexpr auto maximum_nanoseconds{
-            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-        };
-        constexpr std::uint64_t maximum_seconds{
-            maximum_nanoseconds / detail::NANOSECONDS_PER_SECOND
-        };
+        constexpr auto maximum_nanoseconds{ static_cast<std::uint64_t>(
+          std::numeric_limits<std::int64_t>::max()) };
+        constexpr std::uint64_t maximum_seconds{ maximum_nanoseconds / detail::NANOSECONDS_PER_SECOND };
         detail::system_clock_epoch_available =
           realtime_clock_available && timestamp.seconds_since_epoch >= 0 &&
           timestamp.nanoseconds < detail::NANOSECONDS_PER_SECOND &&
-          std::cmp_less_equal(static_cast<std::uint64_t>(timestamp.seconds_since_epoch),
-                              maximum_seconds) &&
-          (std::cmp_not_equal(static_cast<std::uint64_t>(timestamp.seconds_since_epoch),
-                              maximum_seconds) ||
+          std::cmp_less_equal(static_cast<std::uint64_t>(timestamp.seconds_since_epoch), maximum_seconds) &&
+          (std::cmp_not_equal(static_cast<std::uint64_t>(timestamp.seconds_since_epoch), maximum_seconds) ||
            timestamp.nanoseconds <= maximum_nanoseconds % detail::NANOSECONDS_PER_SECOND);
         if (detail::system_clock_epoch_available) {
             detail::system_clock_epoch_nanoseconds =
-              timestamp.seconds_since_epoch *
-                static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) +
+              timestamp.seconds_since_epoch * static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) +
               timestamp.nanoseconds;
         }
 
-        detail::high_resolution_timer =
-          hal::timer::create(detail::HIGH_RESOLUTION_TIMER_INDEX);
+        detail::high_resolution_timer = hal::timer::create(detail::HIGH_RESOLUTION_TIMER_INDEX);
         detail::high_resolution_counter_available =
           detail::high_resolution_timer && detail::high_resolution_timer->start() &&
           detail::read_high_resolution_counter(detail::high_resolution_counter_epoch);

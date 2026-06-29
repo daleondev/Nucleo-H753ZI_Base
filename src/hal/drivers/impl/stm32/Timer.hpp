@@ -1,9 +1,10 @@
 #pragma once
 
-#include "hal/hal.hpp"
 #include "hal/drivers/itf/ITimer.hpp"
+#include "hal/hal.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 
 namespace hal
@@ -15,6 +16,7 @@ namespace hal
         {
             TIM_HandleTypeDef& handle;
             std::uint32_t input_frequency_hz;
+            IRQn_Type interrupt;
         };
 
         explicit Timer(Configuration configuration);
@@ -45,6 +47,8 @@ namespace hal
 
         [[nodiscard]] auto getInputFrequencyHz() const noexcept -> std::uint32_t override;
         [[nodiscard]] auto getTickFrequencyHz() const noexcept -> std::uint32_t override;
+        [[nodiscard]] auto isRunning() const noexcept -> bool override;
+        [[nodiscard]] auto getStateVersion() const noexcept -> std::uint32_t override;
 
         [[nodiscard]] auto getElapsedTime() const noexcept -> std::chrono::nanoseconds override;
 
@@ -58,9 +62,13 @@ namespace hal
 
         auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void override;
 
+        auto markStateChange() noexcept -> void;
+
         TIM_HandleTypeDef& m_handle;
         std::uint32_t m_timerInputHz;
+        IRQn_Type m_interrupt;
         PeriodElapsedCallback m_periodElapsedCallback;
+        std::atomic<std::uint32_t> m_stateVersion{};
 
         static constexpr std::size_t MAX_TIMER_INSTANCES{ 4U };
         inline static std::array<Timer*, MAX_TIMER_INSTANCES> s_registry{};

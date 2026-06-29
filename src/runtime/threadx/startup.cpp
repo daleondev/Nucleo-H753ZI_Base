@@ -5,10 +5,8 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <string>
 
 // These names are prescribed by GNU ld's --wrap convention.
 // NOLINTNEXTLINE(bugprone-reserved-identifier)
@@ -29,8 +27,7 @@ namespace
 
     // ThreadX owns and mutates this statically allocated control block and stack.
     // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
-    alignas(STACK_ALIGNMENT)
-      std::array<std::byte, APPLICATION_THREAD_STACK_SIZE> application_thread_stack{};
+    alignas(STACK_ALIGNMENT) std::array<std::byte, APPLICATION_THREAD_STACK_SIZE> application_thread_stack{};
     std::array<CHAR, APPLICATION_THREAD_NAME_SIZE> application_thread_name{ "Application Thread" };
     TX_THREAD application_thread;
     int application_argc{};
@@ -46,11 +43,8 @@ namespace
 
     auto thread_stack_error_handler(TX_THREAD* thread) noexcept -> void
     {
-        const auto* thread_name = thread != TX_NULL ? thread->tx_thread_name : "Unknown";
-        const std::string message{ std::string{ "Thread " } + thread_name +
-                                   " stack overflow detected\r\n" };
-        std::fputs(message.c_str(), stderr);
-        std::fflush(stderr);
+        // Do not call libc or allocate on the already compromised stack.
+        static_cast<void>(thread);
         Error_Handler();
     }
 
@@ -60,8 +54,7 @@ namespace
         int exit_status{};
         try {
             exit_status = __real_main(application_argc, application_argv);
-        }
-        catch (...) {
+        } catch (...) {
             // Do not permit user exceptions to cross the ThreadX entry frame.
             std::terminate();
         }

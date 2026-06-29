@@ -29,7 +29,7 @@ namespace runtime
 
         struct OnceHandle
         {
-            void* implementation{};
+            unsigned int state{};
         };
 
         struct SemaphoreHandle

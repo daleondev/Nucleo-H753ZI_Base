@@ -54,6 +54,8 @@ namespace hal
 
         [[nodiscard]] virtual auto getInputFrequencyHz() const noexcept -> std::uint32_t = 0;
         [[nodiscard]] virtual auto getTickFrequencyHz() const noexcept -> std::uint32_t = 0;
+        [[nodiscard]] virtual auto isRunning() const noexcept -> bool = 0;
+        [[nodiscard]] virtual auto getStateVersion() const noexcept -> std::uint32_t = 0;
 
         template<typename Rep, typename Period>
         [[nodiscard]] auto durationToTicks(std::chrono::duration<Rep, Period> duration) const noexcept -> Tick
@@ -73,12 +75,11 @@ namespace hal
             requires detail::NothrowPeriodElapsedCallback<Func, Args...>
         auto setPeriodElapsedCallback(Func&& callback, Args&&... args) -> void
         {
-            PeriodElapsedCallback bound_callback{
-              [cb = std::forward<Func>(callback),
-               ... bound_args = std::forward<Args>(args)]() mutable noexcept -> void {
-                  std::invoke(cb, bound_args...);
-              }
-            };
+            PeriodElapsedCallback bound_callback{ [cb = std::forward<Func>(callback),
+                                                   ... bound_args =
+                                                     std::forward<Args>(args)]() mutable noexcept -> void {
+                std::invoke(cb, bound_args...);
+            } };
             setPeriodElapsedCallbackImpl(std::move(bound_callback));
         }
 

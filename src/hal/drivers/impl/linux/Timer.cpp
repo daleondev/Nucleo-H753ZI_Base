@@ -69,9 +69,8 @@ namespace hal
                 std::terminate();
             }
 
-            const std::uint64_t nanoseconds{
-                static_cast<std::uint64_t>(deadline.tv_nsec) + delay_nanoseconds
-            };
+            const std::uint64_t nanoseconds{ static_cast<std::uint64_t>(deadline.tv_nsec) +
+                                             delay_nanoseconds };
             deadline.tv_sec += static_cast<time_t>(nanoseconds / NANOSECONDS_PER_SECOND);
             deadline.tv_nsec = static_cast<long>(nanoseconds % NANOSECONDS_PER_SECOND);
             return deadline;
@@ -85,8 +84,7 @@ namespace hal
       , m_startedAtNanoseconds{ monotonic_nanoseconds() }
     {
         pthread_condattr_t condition_attributes{};
-        if (pthread_mutex_init(&m_mutex, nullptr) != 0 ||
-            pthread_condattr_init(&condition_attributes) != 0 ||
+        if (pthread_mutex_init(&m_mutex, nullptr) != 0 || pthread_condattr_init(&condition_attributes) != 0 ||
             pthread_condattr_setclock(&condition_attributes, CLOCK_MONOTONIC) != 0 ||
             pthread_cond_init(&m_condition, &condition_attributes) != 0) {
             std::terminate();
@@ -114,11 +112,16 @@ namespace hal
     auto Timer::start() noexcept -> util::Result<>
     {
         PthreadLock lock{ m_mutex };
+        if (getTickFrequencyHzUnlocked() == 0U) {
+            return make_error_result(HalError::Error);
+        }
+
         const auto now{ monotonic_nanoseconds() };
         captureCounter(now);
         m_startedAtNanoseconds = now;
         m_running = true;
         m_interruptEnabled = false;
+        ++m_stateVersion;
         notifyWorker();
         return {};
     }
@@ -129,6 +132,7 @@ namespace hal
         captureCounter(monotonic_nanoseconds());
         m_running = false;
         m_interruptEnabled = false;
+        ++m_stateVersion;
         notifyWorker();
         return {};
     }
@@ -145,6 +149,7 @@ namespace hal
         m_startedAtNanoseconds = now;
         m_running = true;
         m_interruptEnabled = true;
+        ++m_stateVersion;
         notifyWorker();
         return {};
     }
@@ -162,6 +167,8 @@ namespace hal
         PthreadLock lock{ m_mutex };
         m_counter = value;
         m_startedAtNanoseconds = monotonic_nanoseconds();
+        ++m_stateVersion;
+        notifyWorker();
     }
 
     auto Timer::getAutoReload() const noexcept -> Tick
@@ -177,6 +184,7 @@ namespace hal
         captureCounter(now);
         m_autoReload = value;
         m_startedAtNanoseconds = now;
+        ++m_stateVersion;
         notifyWorker();
     }
 
@@ -193,6 +201,7 @@ namespace hal
         captureCounter(now);
         m_prescaler = value;
         m_startedAtNanoseconds = now;
+        ++m_stateVersion;
         notifyWorker();
     }
 
@@ -201,6 +210,7 @@ namespace hal
         PthreadLock lock{ m_mutex };
         m_counter = 0U;
         m_startedAtNanoseconds = monotonic_nanoseconds();
+        ++m_stateVersion;
         notifyWorker();
     }
 
@@ -216,6 +226,18 @@ namespace hal
     {
         PthreadLock lock{ m_mutex };
         return getTickFrequencyHzUnlocked();
+    }
+
+    auto Timer::isRunning() const noexcept -> bool
+    {
+        PthreadLock lock{ m_mutex };
+        return m_running;
+    }
+
+    auto Timer::getStateVersion() const noexcept -> std::uint32_t
+    {
+        PthreadLock lock{ m_mutex };
+        return m_stateVersion;
     }
 
     auto Timer::durationToTicksImpl(std::chrono::nanoseconds duration) const noexcept -> Tick
@@ -241,9 +263,8 @@ namespace hal
         }
 
         const std::uint64_t whole_ticks{ seconds * frequency };
-        const std::uint64_t fractional_ticks{
-            (remainder * frequency + NANOSECONDS_PER_SECOND - 1U) / NANOSECONDS_PER_SECOND
-        };
+        const std::uint64_t fractional_ticks{ (remainder * frequency + NANOSECONDS_PER_SECOND - 1U) /
+                                              NANOSECONDS_PER_SECOND };
         if (fractional_ticks > maximum_tick - whole_ticks) {
             return std::numeric_limits<Tick>::max();
         }
@@ -257,6 +278,7 @@ namespace hal
         m_autoReload = ticks == 0U ? 0U : ticks - 1U;
         m_counter = 0U;
         m_startedAtNanoseconds = monotonic_nanoseconds();
+        ++m_stateVersion;
         notifyWorker();
     }
 
@@ -268,9 +290,8 @@ namespace hal
             return std::chrono::nanoseconds::zero();
         }
         const Tick counter{ m_running ? counterAt(monotonic_nanoseconds()) : m_counter };
-        const std::uint64_t nanoseconds{
-            static_cast<std::uint64_t>(counter) * NANOSECONDS_PER_SECOND / frequency
-        };
+        const std::uint64_t nanoseconds{ static_cast<std::uint64_t>(counter) * NANOSECONDS_PER_SECOND /
+                                         frequency };
         return std::chrono::nanoseconds{ static_cast<std::int64_t>(nanoseconds) };
     }
 
@@ -297,9 +318,7 @@ namespace hal
         const std::uint64_t seconds{ elapsed_nanoseconds / NANOSECONDS_PER_SECOND };
         const std::uint64_t remainder{ elapsed_nanoseconds % NANOSECONDS_PER_SECOND };
         const std::uint64_t whole_ticks{ (seconds % period) * (frequency % period) % period };
-        const std::uint64_t fractional_ticks{
-            remainder * frequency / NANOSECONDS_PER_SECOND % period
-        };
+        const std::uint64_t fractional_ticks{ remainder * frequency / NANOSECONDS_PER_SECOND % period };
         const std::uint64_t elapsed_ticks{ (whole_ticks + fractional_ticks) % period };
         return static_cast<Tick>((static_cast<std::uint64_t>(m_counter) + elapsed_ticks) % period);
     }
@@ -310,15 +329,19 @@ namespace hal
         return static_cast<std::uint32_t>(m_timerInputHz / divisor);
     }
 
-    auto Timer::periodNanosecondsUnlocked() const noexcept -> std::uint64_t
+    auto Timer::nanosecondsUntilOverflowUnlocked(std::uint64_t monotonic_nanoseconds) const noexcept
+      -> std::uint64_t
     {
         const std::uint64_t frequency{ getTickFrequencyHzUnlocked() };
         if (frequency == 0U) {
             return NANOSECONDS_PER_SECOND;
         }
 
-        const std::uint64_t hardware_ticks{ static_cast<std::uint64_t>(m_autoReload) + 1U };
-        return (hardware_ticks * NANOSECONDS_PER_SECOND + frequency - 1U) / frequency;
+        const std::uint64_t period{ static_cast<std::uint64_t>(m_autoReload) + 1U };
+        const std::uint64_t counter{ m_running ? counterAt(monotonic_nanoseconds)
+                                               : static_cast<std::uint64_t>(m_counter) % period };
+        const std::uint64_t ticks_until_overflow{ period - counter };
+        return (ticks_until_overflow * NANOSECONDS_PER_SECOND + frequency - 1U) / frequency;
     }
 
     auto Timer::captureCounter(std::uint64_t monotonic_nanoseconds) noexcept -> void
@@ -351,7 +374,8 @@ namespace hal
                 break;
             }
 
-            const timespec deadline{ monotonic_deadline(periodNanosecondsUnlocked()) };
+            const auto now{ monotonic_nanoseconds() };
+            const timespec deadline{ monotonic_deadline(nanosecondsUntilOverflowUnlocked(now)) };
             const int status{ pthread_cond_timedwait(&m_condition, &m_mutex, &deadline) };
             if (status == 0) {
                 continue;

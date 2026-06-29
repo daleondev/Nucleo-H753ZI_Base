@@ -13,15 +13,17 @@ namespace hal
     namespace
     {
         constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
+        constexpr std::uint32_t TIMER_INTERRUPT_PRIORITY{ 5U };
     }
 
     Timer::Timer(Configuration configuration)
       : m_handle{ configuration.handle }
       , m_timerInputHz{ configuration.input_frequency_hz }
+      , m_interrupt{ configuration.interrupt }
     {
         if (std::ranges::any_of(s_registry, [&](const Timer* timer) {
-                return timer != nullptr && &timer->m_handle == &configuration.handle;
-            })) {
+            return timer != nullptr && &timer->m_handle == &configuration.handle;
+        })) {
             std::terminate();
         }
 
@@ -34,24 +36,59 @@ namespace hal
 
     Timer::~Timer()
     {
+        static_cast<void>(HAL_TIM_Base_Stop_IT(&m_handle));
+        HAL_NVIC_DisableIRQ(m_interrupt);
+        HAL_NVIC_ClearPendingIRQ(m_interrupt);
+
         const auto slot{ std::ranges::find(s_registry, this) };
         if (slot != s_registry.end()) {
             *slot = nullptr;
         }
     }
 
-    auto Timer::start() noexcept -> util::Result<> { return make_result(HAL_TIM_Base_Start(&m_handle)); }
+    auto Timer::start() noexcept -> util::Result<>
+    {
+        markStateChange();
+        __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
+        HAL_NVIC_DisableIRQ(m_interrupt);
+        HAL_NVIC_ClearPendingIRQ(m_interrupt);
+        return make_result(HAL_TIM_Base_Start(&m_handle));
+    }
 
-    auto Timer::stop() noexcept -> util::Result<> { return make_result(HAL_TIM_Base_Stop(&m_handle)); }
+    auto Timer::stop() noexcept -> util::Result<>
+    {
+        markStateChange();
+        const auto result{ make_result(HAL_TIM_Base_Stop(&m_handle)) };
+        __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
+        HAL_NVIC_DisableIRQ(m_interrupt);
+        HAL_NVIC_ClearPendingIRQ(m_interrupt);
+        return result;
+    }
 
     auto Timer::startIt() noexcept -> util::Result<>
     {
-        return make_result(HAL_TIM_Base_Start_IT(&m_handle));
+        markStateChange();
+        __HAL_TIM_CLEAR_FLAG(&m_handle, TIM_FLAG_UPDATE);
+        HAL_NVIC_ClearPendingIRQ(m_interrupt);
+        HAL_NVIC_SetPriority(m_interrupt, TIMER_INTERRUPT_PRIORITY, 0U);
+        HAL_NVIC_EnableIRQ(m_interrupt);
+
+        const auto result{ make_result(HAL_TIM_Base_Start_IT(&m_handle)) };
+        if (!result) {
+            __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
+            HAL_NVIC_DisableIRQ(m_interrupt);
+            HAL_NVIC_ClearPendingIRQ(m_interrupt);
+        }
+        return result;
     }
 
     auto Timer::stopIt() noexcept -> util::Result<>
     {
-        return make_result(HAL_TIM_Base_Stop_IT(&m_handle));
+        markStateChange();
+        const auto result{ make_result(HAL_TIM_Base_Stop_IT(&m_handle)) };
+        HAL_NVIC_DisableIRQ(m_interrupt);
+        HAL_NVIC_ClearPendingIRQ(m_interrupt);
+        return result;
     }
 
     auto Timer::getCounter() const noexcept -> Tick
@@ -59,7 +96,11 @@ namespace hal
         return static_cast<Tick>(__HAL_TIM_GET_COUNTER(&m_handle));
     }
 
-    auto Timer::setCounter(Tick value) noexcept -> void { __HAL_TIM_SET_COUNTER(&m_handle, value); }
+    auto Timer::setCounter(Tick value) noexcept -> void
+    {
+        markStateChange();
+        __HAL_TIM_SET_COUNTER(&m_handle, value);
+    }
 
     auto Timer::getAutoReload() const noexcept -> Tick
     {
@@ -68,17 +109,23 @@ namespace hal
 
     auto Timer::setAutoReload(Tick value) noexcept -> void
     {
+        markStateChange();
         __HAL_TIM_SET_AUTORELOAD(&m_handle, value);
     }
 
-    auto Timer::getPrescaler() const noexcept -> Tick
+    auto Timer::getPrescaler() const noexcept -> Tick { return static_cast<Tick>(m_handle.Instance->PSC); }
+
+    auto Timer::setPrescaler(Tick value) noexcept -> void
     {
-        return static_cast<Tick>(m_handle.Instance->PSC);
+        markStateChange();
+        m_handle.Instance->PSC = value;
     }
 
-    auto Timer::setPrescaler(Tick value) noexcept -> void { m_handle.Instance->PSC = value; }
-
-    auto Timer::forceUpdateEvent() noexcept -> void { m_handle.Instance->EGR = TIM_EGR_UG; }
+    auto Timer::forceUpdateEvent() noexcept -> void
+    {
+        markStateChange();
+        m_handle.Instance->EGR = TIM_EGR_UG;
+    }
 
     auto Timer::reset() noexcept -> void { setCounter(0U); }
 
@@ -88,6 +135,16 @@ namespace hal
     {
         const std::uint64_t divisor{ static_cast<std::uint64_t>(getPrescaler()) + 1U };
         return static_cast<std::uint32_t>(m_timerInputHz / divisor);
+    }
+
+    auto Timer::isRunning() const noexcept -> bool
+    {
+        return m_handle.Instance != nullptr && (m_handle.Instance->CR1 & TIM_CR1_CEN) != 0U;
+    }
+
+    auto Timer::getStateVersion() const noexcept -> std::uint32_t
+    {
+        return m_stateVersion.load(std::memory_order_relaxed);
     }
 
     auto Timer::durationToTicksImpl(std::chrono::nanoseconds duration) const noexcept -> Tick
@@ -107,9 +164,8 @@ namespace hal
         }
 
         const std::uint64_t whole_ticks{ seconds * frequency };
-        const std::uint64_t fractional_ticks{
-            (remainder * frequency + NANOSECONDS_PER_SECOND - 1U) / NANOSECONDS_PER_SECOND
-        };
+        const std::uint64_t fractional_ticks{ (remainder * frequency + NANOSECONDS_PER_SECOND - 1U) /
+                                              NANOSECONDS_PER_SECOND };
         if (fractional_ticks > maximum_tick - whole_ticks) {
             return std::numeric_limits<Tick>::max();
         }
@@ -130,15 +186,24 @@ namespace hal
             return std::chrono::nanoseconds::zero();
         }
 
-        const std::uint64_t nanoseconds{
-            static_cast<std::uint64_t>(getCounter()) * NANOSECONDS_PER_SECOND / frequency
-        };
+        const std::uint64_t nanoseconds{ static_cast<std::uint64_t>(getCounter()) * NANOSECONDS_PER_SECOND /
+                                         frequency };
         return std::chrono::nanoseconds{ static_cast<std::int64_t>(nanoseconds) };
     }
 
     auto Timer::setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void
     {
+        const bool restore_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
+        HAL_NVIC_DisableIRQ(m_interrupt);
         m_periodElapsedCallback = std::move(callback);
+        if (restore_interrupt) {
+            HAL_NVIC_EnableIRQ(m_interrupt);
+        }
+    }
+
+    auto Timer::markStateChange() noexcept -> void
+    {
+        static_cast<void>(m_stateVersion.fetch_add(1U, std::memory_order_relaxed));
     }
 
     auto Timer::dispatchPeriodElapsed(TIM_HandleTypeDef* handle) noexcept -> void
@@ -149,5 +214,14 @@ namespace hal
         if (timer != s_registry.end() && (*timer)->m_periodElapsedCallback) {
             (*timer)->m_periodElapsedCallback();
         }
+    }
+}
+
+extern "C" void TIM2_IRQHandler()
+{
+    if (__HAL_TIM_GET_FLAG(&htim2, TIM_FLAG_UPDATE) != RESET &&
+        __HAL_TIM_GET_IT_SOURCE(&htim2, TIM_IT_UPDATE) != RESET) {
+        __HAL_TIM_CLEAR_IT(&htim2, TIM_IT_UPDATE);
+        hal::Timer::dispatchPeriodElapsed(&htim2);
     }
 }

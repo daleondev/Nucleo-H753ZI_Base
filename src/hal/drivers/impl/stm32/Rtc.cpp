@@ -15,13 +15,40 @@ namespace hal
         constexpr std::int64_t SECONDS_PER_HOUR{ 3'600 };
         constexpr std::int64_t SECONDS_PER_MINUTE{ 60 };
 
+        class InterruptGuard
+        {
+          public:
+            InterruptGuard() noexcept
+              : m_previousPrimask{ __get_PRIMASK() }
+            {
+                __disable_irq();
+                __DMB();
+            }
+
+            ~InterruptGuard()
+            {
+                __DMB();
+                if (m_previousPrimask == 0U) {
+                    __enable_irq();
+                }
+            }
+
+            InterruptGuard(const InterruptGuard&) = delete;
+            InterruptGuard& operator=(const InterruptGuard&) = delete;
+            InterruptGuard(InterruptGuard&&) = delete;
+            InterruptGuard& operator=(InterruptGuard&&) = delete;
+
+          private:
+            std::uint32_t m_previousPrimask;
+        };
+
         [[nodiscard]] constexpr auto is_leap_year(std::int32_t year) noexcept -> bool
         {
             return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
         }
 
-        [[nodiscard]] constexpr auto days_in_month(std::int32_t year,
-                                                    std::uint32_t month) noexcept -> std::uint32_t
+        [[nodiscard]] constexpr auto days_in_month(std::int32_t year, std::uint32_t month) noexcept
+          -> std::uint32_t
         {
             switch (month) {
                 case 2U:
@@ -45,13 +72,10 @@ namespace hal
             const std::int32_t era{ (year >= 0 ? year : year - 399) / 400 };
             const auto year_of_era{ static_cast<std::uint32_t>(year - era * 400) };
             const auto adjusted_month{ static_cast<std::int32_t>(month) + (month > 2U ? -3 : 9) };
-            const auto day_of_year{
-                static_cast<std::uint32_t>((153 * adjusted_month + 2) / 5) + day - 1U
-            };
-            const std::uint32_t day_of_era{ year_of_era * 365U + year_of_era / 4U -
-                                            year_of_era / 100U + day_of_year };
-            return static_cast<std::int64_t>(era) * DAYS_PER_ERA + day_of_era -
-                   DAYS_FROM_CIVIL_EPOCH_OFFSET;
+            const auto day_of_year{ static_cast<std::uint32_t>((153 * adjusted_month + 2) / 5) + day - 1U };
+            const std::uint32_t day_of_era{ year_of_era * 365U + year_of_era / 4U - year_of_era / 100U +
+                                            day_of_year };
+            return static_cast<std::int64_t>(era) * DAYS_PER_ERA + day_of_era - DAYS_FROM_CIVIL_EPOCH_OFFSET;
         }
 
         static_assert(days_from_civil(1970, 1U, 1U) == 0);
@@ -69,10 +93,19 @@ namespace hal
         RTC_TimeTypeDef time{};
         RTC_DateTypeDef date{};
 
-        // Reading the date after the time releases the RTC shadow-register
-        // lock and guarantees that both structures belong to one snapshot.
-        if (HAL_RTC_GetTime(&m_handle, &time, RTC_FORMAT_BIN) != HAL_OK ||
-            HAL_RTC_GetDate(&m_handle, &date, RTC_FORMAT_BIN) != HAL_OK) {
+        HAL_StatusTypeDef time_status{};
+        HAL_StatusTypeDef date_status{};
+        {
+            // The shadow-register lock is global to the peripheral. Prevent a
+            // second thread or interrupt from interleaving another Time/Date
+            // read and releasing our snapshot at a calendar rollover.
+            const InterruptGuard interrupt_guard;
+            time_status = HAL_RTC_GetTime(&m_handle, &time, RTC_FORMAT_BIN);
+            // Always read the date, even if a future HAL implementation can
+            // fail GetTime after locking the shadow registers.
+            date_status = HAL_RTC_GetDate(&m_handle, &date, RTC_FORMAT_BIN);
+        }
+        if (time_status != HAL_OK || date_status != HAL_OK) {
             return make_error_result<Timestamp>(HalError::Error);
         }
 
@@ -90,10 +123,8 @@ namespace hal
         };
 
         const std::uint64_t subsecond_ticks{ time.SecondFraction - time.SubSeconds };
-        const std::uint64_t nanoseconds{
-            subsecond_ticks * NANOSECONDS_PER_SECOND /
-            (static_cast<std::uint64_t>(time.SecondFraction) + 1U)
-        };
+        const std::uint64_t nanoseconds{ subsecond_ticks * NANOSECONDS_PER_SECOND /
+                                         (static_cast<std::uint64_t>(time.SecondFraction) + 1U) };
 
         return Timestamp{ .seconds_since_epoch = seconds_since_epoch,
                           .nanoseconds = static_cast<std::uint32_t>(nanoseconds) };

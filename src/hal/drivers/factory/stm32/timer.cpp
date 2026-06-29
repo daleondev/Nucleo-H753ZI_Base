@@ -35,8 +35,8 @@ namespace hal::timer
             return {};
         }
 
-        static auto timer{ std::make_shared<Timer>(
-          Timer::Configuration{ .handle = htim2, .input_frequency_hz = timer2_input_frequency_hz() }) };
+        static auto timer{ std::make_shared<Timer>(Timer::Configuration{
+          .handle = htim2, .input_frequency_hz = timer2_input_frequency_hz(), .interrupt = TIM2_IRQn }) };
         return timer;
     }
 }

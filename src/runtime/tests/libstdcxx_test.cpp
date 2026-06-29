@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+#include <tx_api.h>
+
+#include "runtime/libstdcxx/backend.hpp"
 
 #include <array>
 #include <atomic>
@@ -47,6 +50,7 @@ namespace
     std::atomic_uint static_access_count{};
     std::atomic_uint static_constructor_count{};
     std::atomic_bool static_constructor_synchronized{};
+    std::atomic_uint retrying_static_attempts{};
 
     class ThreadsafeStatic
     {
@@ -59,9 +63,8 @@ namespace
                    std::chrono::steady_clock::now() < deadline) {
                 std::this_thread::yield();
             }
-            static_constructor_synchronized.store(
-              static_access_count.load(std::memory_order_acquire) == 2U,
-              std::memory_order_release);
+            static_constructor_synchronized.store(static_access_count.load(std::memory_order_acquire) == 2U,
+                                                  std::memory_order_release);
         }
 
         [[nodiscard]] auto value() const noexcept -> std::uint32_t { return STATIC_VALUE; }
@@ -71,6 +74,17 @@ namespace
     {
         static ThreadsafeStatic instance;
         return instance;
+    }
+
+    auto retrying_static() -> int&
+    {
+        static int value{ [] {
+            if (retrying_static_attempts.fetch_add(1U) == 0U) {
+                throw std::runtime_error{ "retry static initialization" };
+            }
+            return PROMISE_VALUE;
+        }() };
+        return value;
     }
 }
 
@@ -120,12 +134,70 @@ TEST(RuntimeLibstdcxx, MutexesAndConditionVariables)
     std::shared_timed_mutex shared_timed_mutex;
     shared_timed_mutex.lock();
     bool shared_timed_out{};
-    std::thread shared_timed_thread{
-        [&] { shared_timed_out = !shared_timed_mutex.try_lock_shared_for(1ms); }
-    };
+    std::thread shared_timed_thread{ [&] {
+        shared_timed_out = !shared_timed_mutex.try_lock_shared_for(1ms);
+    } };
     shared_timed_thread.join();
     shared_timed_mutex.unlock();
     EXPECT_TRUE(shared_timed_out);
+}
+
+TEST(RuntimeLibstdcxx, AbortedConditionWaitIsUnlinked)
+{
+    runtime::detail::MutexHandle mutex{};
+    runtime::detail::ConditionHandle condition{};
+    runtime::detail::mutex_init(&mutex);
+    runtime::detail::condition_init(&condition);
+
+    std::atomic_bool entered{};
+    std::atomic_int wait_status{};
+
+    std::thread waiter{ [&] {
+        if (runtime::detail::mutex_lock(&mutex) != 0) {
+            wait_status.store(EINVAL, std::memory_order_release);
+            return;
+        }
+        entered.store(true, std::memory_order_release);
+        wait_status.store(runtime::detail::condition_wait(&condition, &mutex), std::memory_order_release);
+        static_cast<void>(runtime::detail::mutex_unlock(&mutex));
+    } };
+
+    // Let the lower-priority std::thread finish entering its semaphore wait
+    // before attempting to abort that wait.
+    UINT original_priority{};
+    const UINT lower_status{ tx_thread_priority_change(tx_thread_identify(), 17U, &original_priority) };
+    UINT restore_status{ TX_SUCCESS };
+    if (lower_status == TX_SUCCESS) {
+        UINT discarded_priority{};
+        restore_status =
+          tx_thread_priority_change(tx_thread_identify(), original_priority, &discarded_priority);
+    }
+
+    UINT state{};
+    const UINT info_status{ tx_thread_info_get(
+      waiter.native_handle(), nullptr, &state, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) };
+    const bool suspended{ info_status == TX_SUCCESS && state == TX_SEMAPHORE_SUSP };
+
+    const UINT abort_status{ suspended ? tx_thread_wait_abort(waiter.native_handle()) : TX_WAIT_ABORT_ERROR };
+    if (abort_status != TX_SUCCESS) {
+        static_cast<void>(runtime::detail::condition_signal(&condition));
+    }
+    waiter.join();
+
+    EXPECT_EQ(info_status, TX_SUCCESS);
+    EXPECT_EQ(lower_status, TX_SUCCESS);
+    EXPECT_EQ(restore_status, TX_SUCCESS);
+    EXPECT_EQ(state, TX_SEMAPHORE_SUSP);
+    EXPECT_TRUE(suspended);
+    EXPECT_EQ(abort_status, TX_SUCCESS);
+    EXPECT_TRUE(entered.load(std::memory_order_acquire));
+    EXPECT_EQ(wait_status.load(std::memory_order_acquire), EINVAL);
+
+    // This used to address the deleted semaphore through a waiter that was
+    // still linked after TX_WAIT_ABORTED.
+    EXPECT_EQ(runtime::detail::condition_signal(&condition), 0);
+    EXPECT_EQ(runtime::detail::condition_destroy(&condition), 0);
+    EXPECT_EQ(runtime::detail::mutex_destroy(&mutex), 0);
 }
 
 TEST(RuntimeLibstdcxx, Semaphores)
@@ -225,6 +297,12 @@ TEST(RuntimeLibstdcxx, FuturesPromisesAndTasks)
     shared_promise.set_value(SHARED_VALUE);
     EXPECT_EQ(shared_value.get(), SHARED_VALUE);
     EXPECT_EQ(shared_value.get(), SHARED_VALUE);
+
+    std::promise<void> detached_promise;
+    auto detached_completion{ detached_promise.get_future() };
+    std::thread detached_thread{ [promise = std::move(detached_promise)]() mutable { promise.set_value(); } };
+    detached_thread.detach();
+    EXPECT_EQ(detached_completion.wait_for(100ms), std::future_status::ready);
 }
 
 TEST(RuntimeLibstdcxx, StopTokensAndJthreads)
@@ -245,8 +323,7 @@ TEST(RuntimeLibstdcxx, StopTokensAndJthreads)
     bool wait_was_stopped{};
     std::jthread condition_any_thread{ [&](std::stop_token token) {
         std::unique_lock lock{ interruptible_mutex };
-        wait_was_stopped =
-          !interruptible_condition.wait(lock, std::move(token), [] { return false; });
+        wait_was_stopped = !interruptible_condition.wait(lock, std::move(token), [] { return false; });
     } };
     EXPECT_TRUE(condition_any_thread.request_stop());
     condition_any_thread.join();
@@ -303,13 +380,21 @@ TEST(RuntimeLibstdcxx, ThreadExitAndCallOnce)
     std::once_flag retry_once;
     int retry_count{};
     EXPECT_THROW(std::call_once(retry_once,
-                               [&] {
-                                   ++retry_count;
-                                   throw std::runtime_error{ "retry" };
-                               }),
+                                [&] {
+        ++retry_count;
+        throw std::runtime_error{ "retry" };
+    }),
                  std::runtime_error);
     std::call_once(retry_once, [&] { ++retry_count; });
     EXPECT_EQ(retry_count, 2);
+
+    constexpr std::size_t reusable_once_flag_count{ 256U };
+    std::size_t completed{};
+    for (std::size_t index{}; index < reusable_once_flag_count; ++index) {
+        std::once_flag reusable_once;
+        std::call_once(reusable_once, [&] { ++completed; });
+    }
+    EXPECT_EQ(completed, reusable_once_flag_count);
 }
 
 TEST(RuntimeLibstdcxx, ContendedStaticInitialization)
@@ -332,6 +417,13 @@ TEST(RuntimeLibstdcxx, ContendedStaticInitialization)
     ASSERT_NE(instances[0], nullptr);
     EXPECT_EQ(instances[0], instances[1]);
     EXPECT_EQ(instances[0]->value(), STATIC_VALUE);
+}
+
+TEST(RuntimeLibstdcxx, FailedStaticInitializationCanBeRetried)
+{
+    EXPECT_THROW(static_cast<void>(retrying_static()), std::runtime_error);
+    EXPECT_EQ(retrying_static(), PROMISE_VALUE);
+    EXPECT_EQ(retrying_static_attempts.load(), 2U);
 }
 
 TEST(RuntimeLibstdcxx, ClocksAndSleep)

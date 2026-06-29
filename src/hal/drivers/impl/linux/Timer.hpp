@@ -48,6 +48,8 @@ namespace hal
 
         [[nodiscard]] auto getInputFrequencyHz() const noexcept -> std::uint32_t override;
         [[nodiscard]] auto getTickFrequencyHz() const noexcept -> std::uint32_t override;
+        [[nodiscard]] auto isRunning() const noexcept -> bool override;
+        [[nodiscard]] auto getStateVersion() const noexcept -> std::uint32_t override;
 
         [[nodiscard]] auto getElapsedTime() const noexcept -> std::chrono::nanoseconds override;
 
@@ -58,10 +60,10 @@ namespace hal
         auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void override;
 
         [[nodiscard]] auto counterAt(std::uint64_t monotonic_nanoseconds) const noexcept -> Tick;
-        [[nodiscard]] auto durationToTicksUnlocked(std::chrono::nanoseconds duration) const noexcept
-          -> Tick;
+        [[nodiscard]] auto durationToTicksUnlocked(std::chrono::nanoseconds duration) const noexcept -> Tick;
         [[nodiscard]] auto getTickFrequencyHzUnlocked() const noexcept -> std::uint32_t;
-        [[nodiscard]] auto periodNanosecondsUnlocked() const noexcept -> std::uint64_t;
+        [[nodiscard]] auto nanosecondsUntilOverflowUnlocked(
+          std::uint64_t monotonic_nanoseconds) const noexcept -> std::uint64_t;
         auto captureCounter(std::uint64_t monotonic_nanoseconds) noexcept -> void;
         auto notifyWorker() noexcept -> void;
         auto workerLoop() noexcept -> void;
@@ -75,6 +77,7 @@ namespace hal
         bool m_running{};
         bool m_interruptEnabled{};
         bool m_shuttingDown{};
+        std::uint32_t m_stateVersion{};
         mutable pthread_mutex_t m_mutex{};
         pthread_cond_t m_condition{};
         pthread_t m_worker{};
