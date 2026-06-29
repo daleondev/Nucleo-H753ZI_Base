@@ -56,7 +56,8 @@ namespace hal
         return {};
     }
 
-    [[nodiscard]] inline auto make_error_result(HalError error) noexcept -> util::Result<>
+    template<typename T = void>
+    [[nodiscard]] inline auto make_error_result(HalError error) noexcept -> util::Result<T>
     {
         return std::unexpected(make_error_code(error));
     }

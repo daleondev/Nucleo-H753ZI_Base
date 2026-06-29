@@ -8,15 +8,11 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
-#include <ctime>
-#include <limits>
 #include <string>
 #include <string_view>
 
 namespace
 {
-    constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
-
     struct LedState
     {
         std::string_view name;
@@ -45,8 +41,6 @@ namespace
 }
 
 extern "C" {
-
-TIM_HandleTypeDef htim2{};
 
 HAL_StatusTypeDef HAL_Init()
 {
@@ -112,16 +106,6 @@ int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init)
     return BSP_ERROR_NONE;
 }
 
-HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef* timer_handle)
-{
-    if (timer_handle != &htim2) {
-        return HAL_ERROR;
-    }
-    timer_handle->Instance = 1U;
-    print_message("HAL_TIM_Base_Start");
-    return HAL_OK;
-}
-
 void Error_Handler()
 {
     std::fputs("[sim][hal] Error_Handler\n", stderr);
@@ -131,58 +115,6 @@ void Error_Handler()
 }
 
 #endif
-
-extern "C" HAL_StatusTypeDef platform_get_system_time(std::int64_t* seconds_since_epoch,
-                                                        std::uint32_t* nanoseconds)
-{
-#if defined(HAL_PLATFORM_LINUX)
-    if (seconds_since_epoch == nullptr || nanoseconds == nullptr) {
-        return HAL_ERROR;
-    }
-
-    timespec now{};
-    if (clock_gettime(CLOCK_REALTIME, &now) != 0 || now.tv_sec < 0) {
-        return HAL_ERROR;
-    }
-
-    *seconds_since_epoch = static_cast<std::int64_t>(now.tv_sec);
-    *nanoseconds = static_cast<std::uint32_t>(now.tv_nsec);
-    return HAL_OK;
-#else
-    static_cast<void>(seconds_since_epoch);
-    static_cast<void>(nanoseconds);
-    return HAL_ERROR;
-#endif
-}
-
-extern "C" HAL_StatusTypeDef
-  platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter)
-{
-#if defined(HAL_PLATFORM_LINUX)
-    if (counter == nullptr) {
-        return HAL_ERROR;
-    }
-
-    timespec now{};
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0) {
-        return HAL_ERROR;
-    }
-
-    constexpr std::uint64_t nanoseconds_per_second{ 1'000'000'000ULL };
-    const auto seconds{ static_cast<std::uint64_t>(now.tv_sec) };
-    if (seconds > std::numeric_limits<std::uint64_t>::max() / nanoseconds_per_second) {
-        return HAL_ERROR;
-    }
-
-    counter->ticks = (seconds * nanoseconds_per_second) + static_cast<std::uint64_t>(now.tv_nsec);
-    counter->ticks_per_second = nanoseconds_per_second;
-    counter->modulus = 0U;
-    return HAL_OK;
-#else
-    static_cast<void>(counter);
-    return HAL_ERROR;
-#endif
-}
 
 namespace hal
 {
@@ -219,8 +151,7 @@ namespace hal
         bsp_com_init.Parity = COM_PARITY_NONE;
         bsp_com_init.HwFlowCtl = COM_HWCONTROL_NONE;
 
-        if (BSP_COM_Init(COM1, &bsp_com_init) != BSP_ERROR_NONE ||
-            HAL_TIM_Base_Start(&htim2) != HAL_OK) {
+        if (BSP_COM_Init(COM1, &bsp_com_init) != BSP_ERROR_NONE) {
             Error_Handler();
         }
     }

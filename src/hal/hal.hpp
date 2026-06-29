@@ -31,13 +31,6 @@ typedef enum
     HAL_TIMEOUT = 0x03U,
 } HAL_StatusTypeDef;
 
-typedef struct
-{
-    uint32_t Instance;
-} TIM_HandleTypeDef;
-
-extern TIM_HandleTypeDef htim2;
-
 typedef enum
 {
     LED_GREEN = 0,
@@ -100,26 +93,11 @@ int32_t BSP_LED_Toggle(Led_TypeDef led);
 int32_t BSP_PB_Init(Button_TypeDef button, ButtonMode_TypeDef button_mode);
 int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init);
 
-HAL_StatusTypeDef HAL_TIM_Base_Start(TIM_HandleTypeDef* timer_handle);
 void Error_Handler(void);
 
 // NOLINTEND(modernize-use-using,performance-enum-size)
 
 #endif
-
-// These declarations are also consumed by C translation units and
-// intentionally expose writable output pointers.
-// NOLINTBEGIN(modernize-use-using,readability-non-const-parameter)
-typedef struct
-{
-    uint64_t ticks;
-    uint64_t ticks_per_second;
-    uint64_t modulus;
-} PlatformHighResolutionCounter;
-
-HAL_StatusTypeDef platform_get_system_time(int64_t* seconds_since_epoch, uint32_t* nanoseconds);
-HAL_StatusTypeDef platform_get_high_resolution_counter(PlatformHighResolutionCounter* counter);
-// NOLINTEND(modernize-use-using,readability-non-const-parameter)
 
 #ifdef __cplusplus
 }

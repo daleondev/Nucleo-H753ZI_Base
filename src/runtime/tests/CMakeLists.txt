@@ -25,6 +25,7 @@ add_executable(runtime_tests)
 
 target_sources(runtime_tests
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/hal_clock_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libc_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libstdcxx_test.cpp
 )

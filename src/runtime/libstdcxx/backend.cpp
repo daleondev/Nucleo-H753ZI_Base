@@ -1,4 +1,6 @@
 #include "backend.hpp"
+#include "hal/drivers/factory/rtc.hpp"
+#include "hal/drivers/factory/timer.hpp"
 #include "hal/hal.hpp"
 
 #include <algorithm>
@@ -8,6 +10,7 @@
 #include <cstdio>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <new>
 #include <utility>
 
@@ -36,6 +39,14 @@ namespace runtime
             constexpr ULONG ROLLOVER_SAMPLE_TICKS{ 0x7FFFFFFFUL };
             constexpr ULONG MAX_FINITE_WAIT{ TX_WAIT_FOREVER - 1UL };
             constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
+            constexpr std::size_t HIGH_RESOLUTION_TIMER_INDEX{ 2U };
+
+            struct HighResolutionCounter
+            {
+                std::uint64_t ticks{};
+                std::uint64_t ticks_per_second{};
+                std::uint64_t modulus{};
+            };
 
             [[nodiscard]] std::int64_t ticks_to_nanoseconds(std::uint64_t ticks) noexcept
             {
@@ -138,7 +149,8 @@ namespace runtime
             std::uint64_t tick_epoch{};
             std::int64_t system_clock_epoch_nanoseconds{};
             std::uint64_t system_clock_epoch_ticks{};
-            PlatformHighResolutionCounter high_resolution_counter_epoch{};
+            std::shared_ptr<hal::ITimer> high_resolution_timer{};
+            HighResolutionCounter high_resolution_counter_epoch{};
             bool system_clock_epoch_available{};
             bool high_resolution_counter_available{};
 
@@ -164,11 +176,25 @@ namespace runtime
             }
 
             [[nodiscard]] bool valid_high_resolution_counter(
-              const PlatformHighResolutionCounter& counter) noexcept
+              const HighResolutionCounter& counter) noexcept
             {
                 return counter.ticks_per_second != 0U &&
                        counter.ticks_per_second <= NANOSECONDS_PER_SECOND &&
                        (counter.modulus == 0U || counter.ticks < counter.modulus);
+            }
+
+            [[nodiscard]] bool read_high_resolution_counter(
+              HighResolutionCounter& counter) noexcept
+            {
+                if (!high_resolution_timer) {
+                    return false;
+                }
+
+                counter.ticks = high_resolution_timer->getCounter();
+                counter.ticks_per_second = high_resolution_timer->getTickFrequencyHz();
+                counter.modulus =
+                  static_cast<std::uint64_t>(high_resolution_timer->getAutoReload()) + 1U;
+                return valid_high_resolution_counter(counter);
             }
 
             [[nodiscard]] bool thread_ticks_to_counter_ticks(std::uint64_t ticks,
@@ -215,9 +241,8 @@ namespace runtime
                     return false;
                 }
 
-                PlatformHighResolutionCounter current{};
-                if (platform_get_high_resolution_counter(&current) != HAL_OK ||
-                    !valid_high_resolution_counter(current) ||
+                HighResolutionCounter current{};
+                if (!read_high_resolution_counter(current) ||
                     current.ticks_per_second != high_resolution_counter_epoch.ticks_per_second ||
                     current.modulus != high_resolution_counter_epoch.modulus) {
                     return false;
@@ -1375,8 +1400,16 @@ namespace runtime
         detail::tick_epoch = 0U;
         detail::system_clock_epoch_ticks = detail::steady_ticks();
 
-        std::int64_t seconds_since_epoch{};
-        std::uint32_t nanoseconds{};
+        const auto realtime_clock{ hal::rtc::create() };
+        hal::IRtc::Timestamp timestamp{};
+        bool realtime_clock_available{};
+        if (realtime_clock) {
+            const auto result{ realtime_clock->getTime() };
+            if (result) {
+                timestamp = *result;
+                realtime_clock_available = true;
+            }
+        }
         constexpr auto maximum_nanoseconds{
             static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
         };
@@ -1384,20 +1417,25 @@ namespace runtime
             maximum_nanoseconds / detail::NANOSECONDS_PER_SECOND
         };
         detail::system_clock_epoch_available =
-          platform_get_system_time(&seconds_since_epoch, &nanoseconds) == HAL_OK &&
-          seconds_since_epoch >= 0 && nanoseconds < detail::NANOSECONDS_PER_SECOND &&
-          std::cmp_less_equal(static_cast<std::uint64_t>(seconds_since_epoch), maximum_seconds) &&
-          (std::cmp_not_equal(static_cast<std::uint64_t>(seconds_since_epoch), maximum_seconds) ||
-           nanoseconds <= maximum_nanoseconds % detail::NANOSECONDS_PER_SECOND);
+          realtime_clock_available && timestamp.seconds_since_epoch >= 0 &&
+          timestamp.nanoseconds < detail::NANOSECONDS_PER_SECOND &&
+          std::cmp_less_equal(static_cast<std::uint64_t>(timestamp.seconds_since_epoch),
+                              maximum_seconds) &&
+          (std::cmp_not_equal(static_cast<std::uint64_t>(timestamp.seconds_since_epoch),
+                              maximum_seconds) ||
+           timestamp.nanoseconds <= maximum_nanoseconds % detail::NANOSECONDS_PER_SECOND);
         if (detail::system_clock_epoch_available) {
             detail::system_clock_epoch_nanoseconds =
-              seconds_since_epoch * static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) +
-              nanoseconds;
+              timestamp.seconds_since_epoch *
+                static_cast<std::int64_t>(detail::NANOSECONDS_PER_SECOND) +
+              timestamp.nanoseconds;
         }
 
+        detail::high_resolution_timer =
+          hal::timer::create(detail::HIGH_RESOLUTION_TIMER_INDEX);
         detail::high_resolution_counter_available =
-          platform_get_high_resolution_counter(&detail::high_resolution_counter_epoch) == HAL_OK &&
-          detail::valid_high_resolution_counter(detail::high_resolution_counter_epoch);
+          detail::high_resolution_timer && detail::high_resolution_timer->start() &&
+          detail::read_high_resolution_counter(detail::high_resolution_counter_epoch);
 
         UINT status{ tx_mutex_create(
           &detail::initialization_mutex, detail::initialization_mutex_name, TX_INHERIT) };
