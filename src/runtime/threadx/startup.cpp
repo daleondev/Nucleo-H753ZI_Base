@@ -104,6 +104,12 @@ extern "C" void tx_application_define(void* first_unused_memory)
                                     TX_NO_TIME_SLICE,
                                     TX_AUTO_START));
 
+#if defined(HAL_PLATFORM_STM32)
+    // Global constructors execute before ThreadX starts. Preserve the main
+    // execution context's TLS state when user main moves into its ThreadX thread.
+    runtime_tls_adopt_startup(&application_thread);
+#endif
+
     // This creates the runtime's reaper thread, after the application thread.
     runtime_libstdcxx_initialize();
 

@@ -132,7 +132,11 @@ inline int __gthread_cond_wait(__gthread_cond_t* condition, __gthread_mutex_t* m
     return runtime::detail::condition_wait(condition, mutex);
 }
 
-inline int __gthread_cond_wait_recursive(__gthread_cond_t*, __gthread_recursive_mutex_t*) { return ENOTSUP; }
+inline int __gthread_cond_wait_recursive(__gthread_cond_t* condition,
+                                         __gthread_recursive_mutex_t* mutex)
+{
+    return runtime::detail::condition_wait_recursive(condition, mutex);
+}
 
 inline int __gthread_cond_timedwait(__gthread_cond_t* condition,
                                     __gthread_mutex_t* mutex,

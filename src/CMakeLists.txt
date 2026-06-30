@@ -10,3 +10,7 @@ target_include_directories(${PROJECT_NAME}
 
 add_subdirectory(hal)
 add_subdirectory(runtime)
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(hal/tests)
+endif()

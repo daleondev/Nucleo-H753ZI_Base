@@ -37,6 +37,10 @@ extern void runtime_libstdcxx_thread_started(struct TX_THREAD_STRUCT* thread_ptr
 extern void runtime_libc_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
 extern void runtime_libc_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
 extern void runtime_libc_initialize(void);
+extern void runtime_tls_thread_create(struct TX_THREAD_STRUCT* thread_ptr);
+extern void runtime_tls_adopt_startup(struct TX_THREAD_STRUCT* thread_ptr);
+extern void runtime_tls_thread_exit(struct TX_THREAD_STRUCT* thread_ptr);
+extern void runtime_tls_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
 #endif
 
 #ifdef __cplusplus
@@ -51,22 +55,35 @@ extern void runtime_libc_initialize(void);
 
 #define RUNTIME_THREADX_LIBC_INITIALIZE() runtime_libc_initialize()
 
+#define RUNTIME_THREADX_TLS_USER_EXTENSION                   \
+    void* tx_thread_runtime_tls_allocation;                  \
+    void* tx_thread_runtime_tls_block;                       \
+    void* tx_thread_runtime_tls_destructors;
+
+#define RUNTIME_THREADX_TLS_CREATE(thread_ptr) runtime_tls_thread_create(thread_ptr);
+#define RUNTIME_THREADX_TLS_DELETE(thread_ptr) runtime_tls_thread_delete(thread_ptr);
+
 #else
 
 #define RUNTIME_THREADX_LIBC_USER_EXTENSION
 #define RUNTIME_THREADX_LIBC_CREATE(thread_ptr)
 #define RUNTIME_THREADX_LIBC_INITIALIZE() ((void)0)
+#define RUNTIME_THREADX_TLS_USER_EXTENSION
+#define RUNTIME_THREADX_TLS_CREATE(thread_ptr)
+#define RUNTIME_THREADX_TLS_DELETE(thread_ptr)
 
 #endif
 
 #define TX_THREAD_USER_EXTENSION                                      \
     RUNTIME_THREADX_LIBC_USER_EXTENSION                               \
+    RUNTIME_THREADX_TLS_USER_EXTENSION                                \
     void* tx_thread_runtime_tls_values[RUNTIME_THREAD_KEY_COUNT];     \
     unsigned int tx_thread_runtime_tls_generations[RUNTIME_THREAD_KEY_COUNT];
 
 #define TX_THREAD_CREATE_INTERNAL_EXTENSION(thread_ptr) \
     do {                                                \
         RUNTIME_THREADX_LIBC_CREATE(thread_ptr)         \
+        RUNTIME_THREADX_TLS_CREATE(thread_ptr)          \
         runtime_libstdcxx_thread_create(thread_ptr);    \
     } while (0);
 
@@ -89,6 +106,7 @@ extern void runtime_libc_initialize(void);
 #define TX_THREAD_DELETE_PORT_COMPLETION(thread_ptr) \
     do {                                             \
         TX_RESTORE                                   \
+        RUNTIME_THREADX_TLS_DELETE(thread_ptr)        \
         runtime_libc_thread_delete(thread_ptr);      \
         TX_DISABLE                                   \
     } while (0);

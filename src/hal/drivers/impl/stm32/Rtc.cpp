@@ -1,6 +1,7 @@
 #include "Rtc.hpp"
 
 #include "hal/drivers/common.hpp"
+#include "hal/stm32/InterruptGuard.hpp"
 
 #include <cstdint>
 
@@ -14,33 +15,6 @@ namespace hal
         constexpr std::int64_t SECONDS_PER_DAY{ 86'400 };
         constexpr std::int64_t SECONDS_PER_HOUR{ 3'600 };
         constexpr std::int64_t SECONDS_PER_MINUTE{ 60 };
-
-        class InterruptGuard
-        {
-          public:
-            InterruptGuard() noexcept
-              : m_previousPrimask{ __get_PRIMASK() }
-            {
-                __disable_irq();
-                __DMB();
-            }
-
-            ~InterruptGuard()
-            {
-                __DMB();
-                if (m_previousPrimask == 0U) {
-                    __enable_irq();
-                }
-            }
-
-            InterruptGuard(const InterruptGuard&) = delete;
-            InterruptGuard& operator=(const InterruptGuard&) = delete;
-            InterruptGuard(InterruptGuard&&) = delete;
-            InterruptGuard& operator=(InterruptGuard&&) = delete;
-
-          private:
-            std::uint32_t m_previousPrimask;
-        };
 
         [[nodiscard]] constexpr auto is_leap_year(std::int32_t year) noexcept -> bool
         {
@@ -99,7 +73,7 @@ namespace hal
             // The shadow-register lock is global to the peripheral. Prevent a
             // second thread or interrupt from interleaving another Time/Date
             // read and releasing our snapshot at a calendar rollover.
-            const InterruptGuard interrupt_guard;
+            const stm32::InterruptGuard interrupt_guard;
             time_status = HAL_RTC_GetTime(&m_handle, &time, RTC_FORMAT_BIN);
             // Always read the date, even if a future HAL implementation can
             // fail GetTime after locking the shadow registers.

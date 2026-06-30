@@ -14,6 +14,7 @@ target_sources(runtime_libstdcxx
         ${CMAKE_CURRENT_SOURCE_DIR}/terminate.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/thread.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/thread_exit.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tls.cpp
 )
 
 target_include_directories(runtime_libstdcxx
@@ -52,3 +53,12 @@ target_link_options(runtime_libstdcxx
         LINKER:--undefined=runtime_install_terminate_handler
         LINKER:--undefined=runtime_libstdcxx_initialize
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    target_link_options(runtime_libstdcxx
+        INTERFACE
+            LINKER:--undefined=__aeabi_read_tp
+            LINKER:--undefined=__cxa_get_globals
+            LINKER:--undefined=__cxa_thread_atexit
+    )
+endif()

@@ -17,10 +17,7 @@ namespace runtime
             void* implementation{};
         };
 
-        struct RecursiveMutexHandle
-        {
-            void* implementation{};
-        };
+        using RecursiveMutexHandle = MutexHandle;
 
         struct ConditionHandle
         {
@@ -75,6 +72,8 @@ namespace runtime
         void condition_init(ConditionHandle* condition) noexcept;
         int condition_destroy(ConditionHandle* condition) noexcept;
         int condition_wait(ConditionHandle* condition, MutexHandle* mutex) noexcept;
+        int condition_wait_recursive(ConditionHandle* condition,
+                                     RecursiveMutexHandle* mutex) noexcept;
         int condition_timed_wait(ConditionHandle* condition,
                                  MutexHandle* mutex,
                                  const TimePoint* deadline) noexcept;

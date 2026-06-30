@@ -51,6 +51,17 @@ namespace
     std::atomic_uint static_constructor_count{};
     std::atomic_bool static_constructor_synchronized{};
     std::atomic_uint retrying_static_attempts{};
+    std::atomic_uint thread_local_destructor_count{};
+
+    class ThreadLocalState
+    {
+      public:
+        ~ThreadLocalState() { thread_local_destructor_count.fetch_add(1U); }
+
+        int value{};
+    };
+
+    thread_local ThreadLocalState thread_local_state;
 
     class ThreadsafeStatic
     {
@@ -198,6 +209,31 @@ TEST(RuntimeLibstdcxx, AbortedConditionWaitIsUnlinked)
     EXPECT_EQ(runtime::detail::condition_signal(&condition), 0);
     EXPECT_EQ(runtime::detail::condition_destroy(&condition), 0);
     EXPECT_EQ(runtime::detail::mutex_destroy(&mutex), 0);
+}
+
+TEST(RuntimeLibstdcxx, RecursiveConditionWaitAbi)
+{
+    runtime::detail::RecursiveMutexHandle mutex{};
+    runtime::detail::ConditionHandle condition{};
+    runtime::detail::recursive_mutex_init(&mutex);
+    runtime::detail::condition_init(&condition);
+
+    ASSERT_EQ(runtime::detail::recursive_mutex_lock(&mutex), 0);
+    ASSERT_EQ(runtime::detail::recursive_mutex_lock(&mutex), 0);
+    EXPECT_EQ(runtime::detail::condition_wait_recursive(&condition, &mutex), EINVAL);
+    ASSERT_EQ(runtime::detail::recursive_mutex_unlock(&mutex), 0);
+    ASSERT_EQ(runtime::detail::recursive_mutex_unlock(&mutex), 0);
+
+    ASSERT_EQ(runtime::detail::recursive_mutex_lock(&mutex), 0);
+    std::thread notifier{ [&] {
+        EXPECT_EQ(runtime::detail::condition_signal(&condition), 0);
+    } };
+    EXPECT_EQ(runtime::detail::condition_wait_recursive(&condition, &mutex), 0);
+    EXPECT_EQ(runtime::detail::recursive_mutex_unlock(&mutex), 0);
+    notifier.join();
+
+    EXPECT_EQ(runtime::detail::condition_destroy(&condition), 0);
+    EXPECT_EQ(runtime::detail::recursive_mutex_destroy(&mutex), 0);
 }
 
 TEST(RuntimeLibstdcxx, Semaphores)
@@ -424,6 +460,54 @@ TEST(RuntimeLibstdcxx, FailedStaticInitializationCanBeRetried)
     EXPECT_THROW(static_cast<void>(retrying_static()), std::runtime_error);
     EXPECT_EQ(retrying_static(), PROMISE_VALUE);
     EXPECT_EQ(retrying_static_attempts.load(), 2U);
+}
+
+TEST(RuntimeLibstdcxx, ThreadLocalStorageAndConcurrentExceptions)
+{
+    constexpr std::size_t worker_count{ 2U };
+    thread_local_state.value = PROMISE_VALUE;
+    ThreadLocalState* const main_state{ &thread_local_state };
+
+    std::barrier inside_catch{ static_cast<std::ptrdiff_t>(worker_count + 1U) };
+    std::array<ThreadLocalState*, worker_count> states{};
+    std::array<bool, worker_count> passed{};
+    std::array<std::thread, worker_count> workers;
+
+    for (std::size_t index{}; index < workers.size(); ++index) {
+        workers[index] = std::thread{ [&, index] {
+            states[index] = &thread_local_state;
+            const int expected{ static_cast<int>(index) + 1 };
+            const bool initially_zero{ thread_local_state.value == 0 };
+            thread_local_state.value = expected;
+
+            try {
+                throw expected;
+            } catch (...) {
+                const std::exception_ptr exception{ std::current_exception() };
+                inside_catch.arrive_and_wait();
+                try {
+                    std::rethrow_exception(exception);
+                } catch (int value) {
+                    passed[index] = initially_zero && value == expected &&
+                                    thread_local_state.value == expected && std::uncaught_exceptions() == 0;
+                }
+            }
+        } };
+    }
+
+    inside_catch.arrive_and_wait();
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    EXPECT_EQ(thread_local_state.value, PROMISE_VALUE);
+    EXPECT_EQ(&thread_local_state, main_state);
+    EXPECT_EQ(thread_local_destructor_count.load(), worker_count);
+    for (std::size_t index{}; index < worker_count; ++index) {
+        EXPECT_NE(states[index], main_state);
+        EXPECT_TRUE(passed[index]);
+    }
+    EXPECT_NE(states[0], states[1]);
 }
 
 TEST(RuntimeLibstdcxx, ClocksAndSleep)
