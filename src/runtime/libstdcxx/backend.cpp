@@ -1112,15 +1112,12 @@ namespace runtime
             return condition_wait_common(condition, mutex, nullptr);
         }
 
-        int condition_wait_recursive(ConditionHandle* condition,
-                                     RecursiveMutexHandle* mutex) noexcept
+        int condition_wait_recursive(ConditionHandle* condition, RecursiveMutexHandle* mutex) noexcept
         {
             if (mutex == nullptr || mutex->implementation == nullptr) {
                 return EINVAL;
             }
-            const auto* implementation{
-                static_cast<const MutexImplementation*>(mutex->implementation)
-            };
+            const auto* implementation{ static_cast<const MutexImplementation*>(mutex->implementation) };
             if (implementation->mutex.tx_mutex_owner != tx_thread_identify() ||
                 implementation->mutex.tx_mutex_ownership_count != 1U) {
                 return EINVAL;

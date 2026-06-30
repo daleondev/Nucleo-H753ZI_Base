@@ -226,7 +226,9 @@ TEST(RuntimeLibstdcxx, RecursiveConditionWaitAbi)
 
     ASSERT_EQ(runtime::detail::recursive_mutex_lock(&mutex), 0);
     std::thread notifier{ [&] {
+        EXPECT_EQ(runtime::detail::recursive_mutex_lock(&mutex), 0);
         EXPECT_EQ(runtime::detail::condition_signal(&condition), 0);
+        EXPECT_EQ(runtime::detail::recursive_mutex_unlock(&mutex), 0);
     } };
     EXPECT_EQ(runtime::detail::condition_wait_recursive(&condition, &mutex), 0);
     EXPECT_EQ(runtime::detail::recursive_mutex_unlock(&mutex), 0);

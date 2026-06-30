@@ -56,30 +56,21 @@ inline __gthread_t __gthread_self() { return runtime::detail::thread_self(); }
 
 inline int __gthread_yield() { return runtime::detail::thread_yield(); }
 
-inline void __gthread_mutex_init_function(__gthread_mutex_t* mutex)
-{
-    runtime::detail::mutex_init(mutex);
-}
+inline void __gthread_mutex_init_function(__gthread_mutex_t* mutex) { runtime::detail::mutex_init(mutex); }
 
 inline void __gthread_recursive_mutex_init_function(__gthread_recursive_mutex_t* mutex)
 {
     runtime::detail::recursive_mutex_init(mutex);
 }
 
-inline int __gthread_mutex_destroy(__gthread_mutex_t* mutex)
-{
-    return runtime::detail::mutex_destroy(mutex);
-}
+inline int __gthread_mutex_destroy(__gthread_mutex_t* mutex) { return runtime::detail::mutex_destroy(mutex); }
 
 inline int __gthread_recursive_mutex_destroy(__gthread_recursive_mutex_t* mutex)
 {
     return runtime::detail::recursive_mutex_destroy(mutex);
 }
 
-inline int __gthread_mutex_lock(__gthread_mutex_t* mutex)
-{
-    return runtime::detail::mutex_lock(mutex);
-}
+inline int __gthread_mutex_lock(__gthread_mutex_t* mutex) { return runtime::detail::mutex_lock(mutex); }
 
 inline int __gthread_recursive_mutex_lock(__gthread_recursive_mutex_t* mutex)
 {
@@ -107,10 +98,7 @@ inline int __gthread_recursive_mutex_timedlock(__gthread_recursive_mutex_t* mute
     return runtime::detail::recursive_mutex_timed_lock(mutex, deadline);
 }
 
-inline int __gthread_mutex_unlock(__gthread_mutex_t* mutex)
-{
-    return runtime::detail::mutex_unlock(mutex);
-}
+inline int __gthread_mutex_unlock(__gthread_mutex_t* mutex) { return runtime::detail::mutex_unlock(mutex); }
 
 inline int __gthread_recursive_mutex_unlock(__gthread_recursive_mutex_t* mutex)
 {
@@ -132,8 +120,7 @@ inline int __gthread_cond_wait(__gthread_cond_t* condition, __gthread_mutex_t* m
     return runtime::detail::condition_wait(condition, mutex);
 }
 
-inline int __gthread_cond_wait_recursive(__gthread_cond_t* condition,
-                                         __gthread_recursive_mutex_t* mutex)
+inline int __gthread_cond_wait_recursive(__gthread_cond_t* condition, __gthread_recursive_mutex_t* mutex)
 {
     return runtime::detail::condition_wait_recursive(condition, mutex);
 }
