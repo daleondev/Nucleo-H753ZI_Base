@@ -15,13 +15,19 @@ namespace hal
     class IEthernet
     {
       public:
-        using EtherType = std::uint16_t;
+        enum class EtherType : std::uint16_t
+        {
+            IPv4 = 0x0800U,
+            ARP = 0x0806U,
+            VLAN = 0x8100U,
+            EtherCAT = 0x88A4U,
+            SERVICE_VLAN = 0x88A8U,
+            IPv6 = 0x86DDU
+        };
+
         static constexpr std::size_t MAC_ADDRESS_SIZE{ 6U };
         using MacAddress = std::array<std::uint8_t, MAC_ADDRESS_SIZE>;
 
-        static constexpr EtherType ETHERCAT_ETHER_TYPE{ 0x88A4U };
-        static constexpr EtherType VLAN_ETHER_TYPE{ 0x8100U };
-        static constexpr EtherType SERVICE_VLAN_ETHER_TYPE{ 0x88A8U };
         static constexpr std::size_t ETHERNET_HEADER_SIZE{ 14U };
         static constexpr std::size_t VLAN_HEADER_SIZE{ 18U };
         static constexpr std::size_t MIN_FRAME_SIZE{ 60U };
@@ -49,7 +55,7 @@ namespace hal
         struct Configuration
         {
             std::string_view interface_name{ "eth0" };
-            std::optional<EtherType> receive_ether_type{ ETHERCAT_ETHER_TYPE };
+            std::optional<EtherType> receive_ether_type{ EtherType::EtherCAT };
             bool promiscuous{};
             std::uint8_t phy_address{};
         };
@@ -84,12 +90,13 @@ namespace hal
 
             const auto read_ether_type = [&](std::size_t offset) {
                 return static_cast<EtherType>(
-                  static_cast<EtherType>(std::to_integer<std::uint8_t>(frame[offset])) << BITS_PER_BYTE |
+                  static_cast<std::underlying_type_t<EtherType>>(std::to_integer<std::uint8_t>(frame[offset]))
+                    << BITS_PER_BYTE |
                   std::to_integer<std::uint8_t>(frame[offset + 1U]));
             };
 
             std::size_t offset{ ETHER_TYPE_OFFSET };
-            while (*type == VLAN_ETHER_TYPE || *type == SERVICE_VLAN_ETHER_TYPE) {
+            while (*type == EtherType::VLAN || *type == EtherType::SERVICE_VLAN) {
                 offset += VLAN_TAG_SIZE;
                 if (frame.size() < offset + sizeof(EtherType)) {
                     return std::nullopt;
@@ -99,16 +106,16 @@ namespace hal
             return type;
         }
 
-        [[nodiscard]] static constexpr auto frameOuterEtherType(
-          std::span<const std::byte> frame) noexcept -> std::optional<EtherType>
+        [[nodiscard]] static constexpr auto frameOuterEtherType(std::span<const std::byte> frame) noexcept
+          -> std::optional<EtherType>
         {
             if (frame.size() < ETHERNET_HEADER_SIZE) {
                 return std::nullopt;
             }
-            return static_cast<EtherType>(
-              static_cast<EtherType>(std::to_integer<std::uint8_t>(frame[ETHER_TYPE_OFFSET]))
-                << BITS_PER_BYTE |
-              std::to_integer<std::uint8_t>(frame[ETHER_TYPE_OFFSET + 1U]));
+            return static_cast<EtherType>(static_cast<std::underlying_type_t<EtherType>>(
+                                            std::to_integer<std::uint8_t>(frame[ETHER_TYPE_OFFSET]))
+                                            << BITS_PER_BYTE |
+                                          std::to_integer<std::uint8_t>(frame[ETHER_TYPE_OFFSET + 1U]));
         }
 
       protected:

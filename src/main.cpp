@@ -1,5 +1,5 @@
-#include "hal/hal.hpp"
 #include "hal/drivers/factory/ethernet.hpp"
+#include "hal/hal.hpp"
 
 #include <array>
 #include <chrono>
@@ -60,8 +60,7 @@ namespace
         static_cast<void>(std::fflush(stdout));
     }
 
-    [[nodiscard]] constexpr auto duplex_name(hal::IEthernet::Duplex duplex) noexcept
-      -> const char*
+    [[nodiscard]] constexpr auto duplex_name(hal::IEthernet::Duplex duplex) noexcept -> const char*
     {
         switch (duplex) {
             using enum hal::IEthernet::Duplex;
@@ -75,9 +74,8 @@ namespace
         return "unknown";
     }
 
-    auto write_little_endian(std::span<std::byte> bytes,
-                             std::size_t offset,
-                             std::uint16_t value) noexcept -> void
+    auto write_little_endian(std::span<std::byte> bytes, std::size_t offset, std::uint16_t value) noexcept
+      -> void
     {
         bytes[offset] = static_cast<std::byte>(value & LOW_BYTE_MASK);
         bytes[offset + 1U] = static_cast<std::byte>(value >> hal::IEthernet::BITS_PER_BYTE);
@@ -85,14 +83,14 @@ namespace
 
     auto write_big_endian(std::span<std::byte> bytes,
                           std::size_t offset,
-                          std::uint16_t value) noexcept -> void
+                          hal::IEthernet::EtherType value) noexcept -> void
     {
-        bytes[offset] = static_cast<std::byte>(value >> hal::IEthernet::BITS_PER_BYTE);
-        bytes[offset + 1U] = static_cast<std::byte>(value & LOW_BYTE_MASK);
+        bytes[offset] = static_cast<std::byte>(std::to_underlying(value) >> hal::IEthernet::BITS_PER_BYTE);
+        bytes[offset + 1U] = static_cast<std::byte>(std::to_underlying(value) & LOW_BYTE_MASK);
     }
 
-    [[nodiscard]] auto read_little_endian(std::span<const std::byte> bytes,
-                                          std::size_t offset) noexcept -> std::uint16_t
+    [[nodiscard]] auto read_little_endian(std::span<const std::byte> bytes, std::size_t offset) noexcept
+      -> std::uint16_t
     {
         return static_cast<std::uint16_t>(
           std::to_integer<std::uint8_t>(bytes[offset]) |
@@ -100,16 +98,14 @@ namespace
             << hal::IEthernet::BITS_PER_BYTE);
     }
 
-    [[nodiscard]] auto make_probe(std::uint8_t index)
-      -> std::array<std::byte, hal::IEthernet::MIN_FRAME_SIZE>
+    [[nodiscard]] auto make_probe(std::uint8_t index) -> std::array<std::byte, hal::IEthernet::MIN_FRAME_SIZE>
     {
         std::array<std::byte, hal::IEthernet::MIN_FRAME_SIZE> frame{};
         for (std::size_t byte{}; byte < hal::IEthernet::MAC_ADDRESS_SIZE; ++byte) {
             frame[DESTINATION_OFFSET + byte] = BROADCAST_MAC_BYTE;
         }
 
-        write_big_endian(
-          frame, hal::IEthernet::ETHER_TYPE_OFFSET, hal::IEthernet::ETHERCAT_ETHER_TYPE);
+        write_big_endian(frame, hal::IEthernet::ETHER_TYPE_OFFSET, hal::IEthernet::EtherType::EtherCAT);
         write_little_endian(frame, ETHERCAT_HEADER_OFFSET, ETHERCAT_PROTOCOL_HEADER);
         frame[COMMAND_OFFSET] = static_cast<std::byte>(BROADCAST_READ_COMMAND);
         frame[INDEX_OFFSET] = static_cast<std::byte>(index);
@@ -127,13 +123,12 @@ namespace
                                       const hal::IEthernet::MacAddress& local_mac) noexcept -> bool
     {
         if (frame.size() < RESPONSE_SIZE ||
-            hal::IEthernet::frameEtherType(frame) != hal::IEthernet::ETHERCAT_ETHER_TYPE ||
+            hal::IEthernet::frameEtherType(frame) != hal::IEthernet::EtherType::EtherCAT ||
             read_little_endian(frame, ETHERCAT_HEADER_OFFSET) != ETHERCAT_PROTOCOL_HEADER ||
             std::to_integer<std::uint8_t>(frame[COMMAND_OFFSET]) != BROADCAST_READ_COMMAND ||
             std::to_integer<std::uint8_t>(frame[INDEX_OFFSET]) != index ||
             read_little_endian(frame, ADDRESS_REGISTER_OFFSET) != AL_STATUS_REGISTER ||
-            (read_little_endian(frame, DATAGRAM_LENGTH_OFFSET) & DATAGRAM_LENGTH_MASK) !=
-              AL_STATUS_SIZE) {
+            (read_little_endian(frame, DATAGRAM_LENGTH_OFFSET) & DATAGRAM_LENGTH_MASK) != AL_STATUS_SIZE) {
             return false;
         }
 
@@ -149,8 +144,7 @@ namespace
     [[nodiscard]] auto wait_for_link(const hal::IEthernet& ethernet) -> bool
     {
         debug("[ethercat] waiting up to %zu ms for link",
-              static_cast<std::size_t>(LINK_ATTEMPTS) *
-                static_cast<std::size_t>(LINK_POLL_INTERVAL.count()));
+              static_cast<std::size_t>(LINK_ATTEMPTS) * static_cast<std::size_t>(LINK_POLL_INTERVAL.count()));
         for (unsigned int attempt{}; attempt < LINK_ATTEMPTS; ++attempt) {
             const auto link{ ethernet.getLinkInfo() };
             if (link && link->up) {
