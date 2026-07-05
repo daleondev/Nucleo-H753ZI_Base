@@ -28,6 +28,9 @@ typedef struct
  */
 __attribute__((noreturn)) void hal_panic_handler(const HalPanicInfo* info) HAL_PANIC_NOEXCEPT;
 
+/** Project-owned bridge used by generated platform error handlers. */
+__attribute__((noreturn)) void hal_error_handler(void) HAL_PANIC_NOEXCEPT;
+
 #ifdef __cplusplus
 }
 #endif

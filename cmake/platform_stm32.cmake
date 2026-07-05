@@ -65,7 +65,27 @@ target_sources(platform
         ${PROJECT_SOURCE_DIR}/external/stm32h7xx-nucleo-bsp/stm32h7xx_nucleo.c  
 )
 
+# CubeMX owns these functions outside USER CODE sections. Rename only the
+# generated definitions so project-owned implementations remain stable across
+# regeneration. Calls inside main.c still reach CubeMX_Error_Handler(), whose
+# preserved USER CODE body delegates to hal_error_handler().
+set_source_files_properties(
+    ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/main.c
+    PROPERTIES
+        COMPILE_DEFINITIONS "Error_Handler=CubeMX_Error_Handler"
+)
+set_source_files_properties(
+    ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_it.c
+    PROPERTIES
+        COMPILE_DEFINITIONS "EXTI15_10_IRQHandler=CubeMX_EXTI15_10_IRQHandler"
+)
+
+include(${PROJECT_SOURCE_DIR}/cmake/verify_cubemx.cmake)
+verify_cubemx_generation()
+
 target_include_directories(platform
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
     PUBLIC
         # tx_api.h includes this as "tx_user.h". It must precede CubeMX/Inc,
         # which also contains CubeMX's generated tx_user.h.

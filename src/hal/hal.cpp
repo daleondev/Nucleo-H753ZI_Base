@@ -48,7 +48,7 @@ namespace hal
     }
 }
 
-extern "C" [[noreturn]] void Error_Handler()
+extern "C" [[noreturn]] void hal_error_handler() noexcept
 {
     const HalPanicInfo info{
         .message = "HAL Error_Handler invoked",
@@ -58,3 +58,8 @@ extern "C" [[noreturn]] void Error_Handler()
     };
     hal_panic_handler(&info);
 }
+
+// The STM32-generated main.h declares this without attributes. Keep this
+// definition attribute-free so regenerating that header cannot create a C++
+// declaration mismatch. hal_error_handler() still guarantees no return.
+extern "C" void Error_Handler() { hal_error_handler(); }

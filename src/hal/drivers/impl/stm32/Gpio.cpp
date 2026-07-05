@@ -310,3 +310,13 @@ extern "C" void EXTI9_5_IRQHandler()
     HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_8);
     HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_9);
 }
+
+extern "C" void EXTI15_10_IRQHandler()
+{
+    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_10);
+    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_11);
+    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_12);
+    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_13);
+    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_14);
+    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_15);
+}
