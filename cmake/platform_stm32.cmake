@@ -75,6 +75,11 @@ target_include_directories(platform
 )
 
 target_compile_definitions(platform
+    PRIVATE
+        # Ethernet descriptors and raw frame buffers are linked into D2
+        # SRAM2/SRAM3. SystemInit() uses this definition to enable all D2 SRAM
+        # interfaces before the MPU, D-cache, and Ethernet DMA are started.
+        DATA_IN_D2_SRAM
     PUBLIC
         USE_PWR_LDO_SUPPLY
         USE_HAL_DRIVER

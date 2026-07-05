@@ -131,7 +131,6 @@ namespace
             read_little_endian(frame, ETHERCAT_HEADER_OFFSET) != ETHERCAT_PROTOCOL_HEADER ||
             std::to_integer<std::uint8_t>(frame[COMMAND_OFFSET]) != BROADCAST_READ_COMMAND ||
             std::to_integer<std::uint8_t>(frame[INDEX_OFFSET]) != index ||
-            read_little_endian(frame, ADDRESS_POSITION_OFFSET) != 0U ||
             read_little_endian(frame, ADDRESS_REGISTER_OFFSET) != AL_STATUS_REGISTER ||
             (read_little_endian(frame, DATAGRAM_LENGTH_OFFSET) & DATAGRAM_LENGTH_MASK) !=
               AL_STATUS_SIZE) {
@@ -192,14 +191,25 @@ namespace
         }
 
         const std::uint16_t working_counter{ read_little_endian(frame, WORKING_COUNTER_OFFSET) };
+        const std::uint16_t slave_count{ read_little_endian(frame, ADDRESS_POSITION_OFFSET) };
         const std::uint16_t al_status{ read_little_endian(frame, DATA_OFFSET) };
-        debug("[ethercat] RX index=%u bytes=%zu WKC=%u AL status=0x%04X",
+        debug("[ethercat] RX index=%u bytes=%zu slaves=%u WKC=%u AL status=0x%04X",
               static_cast<unsigned int>(index),
               *received,
+              static_cast<unsigned int>(slave_count),
               static_cast<unsigned int>(working_counter),
               static_cast<unsigned int>(al_status));
         if (working_counter == 0U) {
             debug("[ethercat] RX rejected: no EtherCAT slave processed the datagram");
+            return false;
+        }
+        // BRD increments ADP once at every slave. Every ESC supports AL Status,
+        // so the returned ADP and working counter must identify the same number
+        // of slaves.
+        if (slave_count != working_counter) {
+            debug("[ethercat] RX rejected: slave count %u does not match WKC %u",
+                  static_cast<unsigned int>(slave_count),
+                  static_cast<unsigned int>(working_counter));
             return false;
         }
         return true;
