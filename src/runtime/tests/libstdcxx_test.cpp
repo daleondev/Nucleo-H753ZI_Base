@@ -11,7 +11,9 @@
 #include <cstdint>
 #include <future>
 #include <latch>
+#include <limits>
 #include <mutex>
+#include <random>
 #include <semaphore>
 #include <shared_mutex>
 #include <stdexcept>
@@ -151,6 +153,18 @@ TEST(RuntimeLibstdcxx, MutexesAndConditionVariables)
     shared_timed_thread.join();
     shared_timed_mutex.unlock();
     EXPECT_TRUE(shared_timed_out);
+}
+
+TEST(RuntimeLibstdcxx, RandomDeviceUsesHardwareEntropyProvider)
+{
+    std::random_device default_device;
+    std::random_device hardware_device{ "hardware" };
+
+    EXPECT_EQ(default_device.entropy(), std::numeric_limits<std::random_device::result_type>::digits);
+    static_cast<void>(default_device());
+    static_cast<void>(hardware_device());
+
+    EXPECT_THROW(static_cast<void>(std::random_device{ "mt19937" }), std::runtime_error);
 }
 
 TEST(RuntimeLibstdcxx, AbortedConditionWaitIsUnlinked)

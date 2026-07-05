@@ -5,6 +5,7 @@ target_sources(hal_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/clock_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ethernet_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gpio_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rng_test.cpp
 )
 
 target_link_libraries(hal_tests

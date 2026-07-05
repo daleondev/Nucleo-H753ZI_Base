@@ -62,16 +62,16 @@ TEST(HalGpioDevices, ButtonTranslatesBothEdgesUsingActivePolarity)
     hal::device::Button button{ input, hal::gpio::Level::High };
     EXPECT_FALSE(button.isPressed());
 
-    hal::device::ButtonState observed{ hal::device::ButtonState::Released };
+    hal::device::IButton::State observed{ hal::device::IButton::State::Released };
     unsigned int callback_count{};
-    button.setStateChangedCallback([&](hal::device::ButtonState state) noexcept {
+    button.setStateChangedCallback([&](hal::device::IButton::State state) noexcept {
         observed = state;
         ++callback_count;
     });
 
     input->setSimulatedLevel(hal::gpio::Level::High);
     EXPECT_TRUE(button.isPressed());
-    EXPECT_EQ(observed, hal::device::ButtonState::Pressed);
+    EXPECT_EQ(observed, hal::device::IButton::State::Pressed);
     EXPECT_EQ(callback_count, 1U);
 
     input->setSimulatedLevel(hal::gpio::Level::High);
@@ -79,7 +79,7 @@ TEST(HalGpioDevices, ButtonTranslatesBothEdgesUsingActivePolarity)
 
     input->setSimulatedLevel(hal::gpio::Level::Low);
     EXPECT_FALSE(button.isPressed());
-    EXPECT_EQ(observed, hal::device::ButtonState::Released);
+    EXPECT_EQ(observed, hal::device::IButton::State::Released);
     EXPECT_EQ(callback_count, 2U);
 }
 

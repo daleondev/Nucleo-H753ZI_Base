@@ -10,6 +10,7 @@ target_sources(runtime_libstdcxx
         ${CMAKE_CURRENT_SOURCE_DIR}/cxx_guard.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/future.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/once.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/random.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/sleep.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/terminate.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/thread.cpp
