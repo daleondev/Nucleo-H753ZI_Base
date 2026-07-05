@@ -4,9 +4,18 @@ add_subdirectory(board)
 
 add_library(hal STATIC)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    set(HAL_PLATFORM_DIRECTORY stm32)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(HAL_PLATFORM_DIRECTORY linux)
+else()
+    message(FATAL_ERROR "Unsupported HAL platform: ${CMAKE_SYSTEM_NAME}")
+endif()
+
 target_sources(hal
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hal.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/${HAL_PLATFORM_DIRECTORY}/hal.cpp
 )
 
 target_link_libraries(hal
@@ -26,8 +35,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PUBLIC
             HAL_PLATFORM_LINUX
     )
-else()
-    message(FATAL_ERROR "Unsupported HAL platform: ${CMAKE_SYSTEM_NAME}")
 endif()
 
 target_link_libraries(${PROJECT_NAME}
