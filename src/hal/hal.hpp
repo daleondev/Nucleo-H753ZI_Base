@@ -71,7 +71,7 @@ void MX_FDCAN1_Init(void);
 
 int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init);
 
-void Error_Handler(void);
+__attribute__((noreturn)) void Error_Handler(void);
 
 // NOLINTEND(modernize-use-using,performance-enum-size)
 

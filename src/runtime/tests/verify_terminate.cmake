@@ -23,9 +23,13 @@ if(result MATCHES "[Tt]imeout")
     message(FATAL_ERROR "Terminate probe timed out")
 endif()
 
-string(FIND "${error}" "[sim][hal] Error_Handler" error_handler_position)
-if(error_handler_position EQUAL -1)
+if(NOT DEFINED EXPECTED_PANIC)
+    set(EXPECTED_PANIC "Unhandled C++ exception")
+endif()
+
+string(FIND "${error}" "[hal][panic] ${EXPECTED_PANIC}" panic_position)
+if(panic_position EQUAL -1)
     message(FATAL_ERROR
-        "Terminate probe did not reach Error_Handler\nstdout:\n${output}\nstderr:\n${error}"
+        "Terminate probe did not reach the panic handler\nstdout:\n${output}\nstderr:\n${error}"
     )
 endif()

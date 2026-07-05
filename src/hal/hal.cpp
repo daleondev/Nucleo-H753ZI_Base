@@ -1,4 +1,5 @@
 #include "hal.hpp"
+#include "hal/panic.h"
 
 #include <cstdint>
 
@@ -6,7 +7,6 @@
 
 #include <cassert>
 #include <cstdio>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 
@@ -58,12 +58,6 @@ int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init)
     return BSP_ERROR_NONE;
 }
 
-void Error_Handler()
-{
-    std::fputs("[sim][hal] Error_Handler\n", stderr);
-    std::fflush(stderr);
-    std::abort();
-}
 }
 
 #endif
@@ -101,4 +95,15 @@ namespace hal
             Error_Handler();
         }
     }
+}
+
+extern "C" [[noreturn]] void Error_Handler()
+{
+    const HalPanicInfo info{
+        .message = "HAL Error_Handler invoked",
+        .file = nullptr,
+        .function = nullptr,
+        .line = 0U,
+    };
+    hal_panic_handler(&info);
 }

@@ -69,6 +69,15 @@ target_compile_definitions(runtime_static_terminate_probe
 )
 runtime_attach_threadx_startup(runtime_static_terminate_probe)
 
+add_executable(runtime_panic_override_probe
+    ${CMAKE_CURRENT_SOURCE_DIR}/panic_override_probe.cpp
+)
+target_compile_definitions(runtime_panic_override_probe
+    PRIVATE
+        RUNTIME_APPLICATION_THREAD_STACK_SIZE=65536U
+)
+runtime_attach_threadx_startup(runtime_panic_override_probe)
+
 add_test(
     NAME runtime.terminate.application
     COMMAND ${CMAKE_COMMAND}
@@ -89,9 +98,25 @@ add_test(
             -DPROBE=$<TARGET_FILE:runtime_static_terminate_probe>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_terminate.cmake
 )
+add_test(
+    NAME runtime.panic.error_handler
+    COMMAND ${CMAKE_COMMAND}
+            -DPROBE=$<TARGET_FILE:runtime_terminate_probe>
+            -DPROBE_MODE=error_handler
+            "-DEXPECTED_PANIC=HAL Error_Handler invoked"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_terminate.cmake
+)
+add_test(
+    NAME runtime.panic.override
+    COMMAND ${CMAKE_COMMAND}
+            -DPROBE=$<TARGET_FILE:runtime_panic_override_probe>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_panic_override.cmake
+)
 set_tests_properties(
     runtime.terminate.application
     runtime.terminate.thread
     runtime.terminate.static_initialization
+    runtime.panic.error_handler
+    runtime.panic.override
     PROPERTIES TIMEOUT 10
 )

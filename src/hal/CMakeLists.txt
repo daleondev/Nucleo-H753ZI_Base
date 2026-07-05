@@ -7,6 +7,8 @@ add_library(hal STATIC)
 target_sources(hal
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hal.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panic.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panic_default.cpp
 )
 
 target_link_libraries(hal

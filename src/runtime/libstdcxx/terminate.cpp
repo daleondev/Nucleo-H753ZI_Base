@@ -1,17 +1,12 @@
-#include "hal/hal.hpp"
+#include "hal/panic.hpp"
 
-#include <cstdlib>
 #include <exception>
 
 namespace
 {
     [[noreturn]] auto runtime_terminate_handler() noexcept -> void
     {
-        Error_Handler();
-
-        // Error_Handler is expected not to return on either platform. Keep a
-        // standards-compliant fallback in case a future implementation does.
-        std::abort();
+        hal::panic("Unhandled C++ exception");
     }
 }
 
