@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hal/panic.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -80,8 +82,14 @@ __attribute__((noreturn)) void Error_Handler(void);
 #ifdef __cplusplus
 }
 
+#include <source_location>
+
 namespace hal
 {
     auto initialize() noexcept -> void;
+
+    [[noreturn]] auto panic(
+      const char* message,
+      std::source_location location = std::source_location::current()) noexcept -> void;
 }
 #endif

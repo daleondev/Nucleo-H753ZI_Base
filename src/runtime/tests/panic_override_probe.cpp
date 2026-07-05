@@ -1,4 +1,4 @@
-#include "hal/panic.hpp"
+#include "hal/hal.hpp"
 
 #include <cstdlib>
 #include <string_view>
