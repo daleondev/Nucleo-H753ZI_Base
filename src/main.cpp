@@ -1,6 +1,7 @@
 #include "hal/board/board.hpp"
 #include "hal/drivers/factory/ethernet.hpp"
 #include "hal/hal.hpp"
+#include "filex/ram_disk_sample.hpp"
 
 #include <array>
 #include <atomic>
@@ -69,6 +70,13 @@ namespace
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 {
+    const UINT filex_status{ sample::runFilexRamDisk() };
+    if (filex_status != FX_SUCCESS) {
+        debug("[filex] RAM-disk sample failed, status=0x%02x", filex_status);
+        indicate_failure();
+    }
+    debug("[filex] RAM-disk format/write/read sample passed");
+
     const auto user_button{ hal::board::createButton(hal::board::ButtonId::User) };
     if (user_button == nullptr) {
         debug("[input] user button creation failed");

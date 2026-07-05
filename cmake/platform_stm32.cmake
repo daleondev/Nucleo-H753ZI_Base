@@ -4,6 +4,10 @@ set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/src/runtime/threadx/tx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
 target_link_libraries(threadx PRIVATE project_compiler_settings)
 
+set(FX_USER_FILE ${PROJECT_SOURCE_DIR}/src/runtime/filex/fx_user.h)
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/filex)
+target_link_libraries(filex PRIVATE project_compiler_settings)
+
 # This setting changes ThreadX-visible structures and must be consistent for
 # the kernel and every consumer of tx_api.h.
 target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING)
@@ -89,6 +93,7 @@ target_compile_definitions(platform
 
 target_link_libraries(platform
     PUBLIC
+        filex
         threadx
 )
 

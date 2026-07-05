@@ -5,6 +5,10 @@ set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/src/runtime/threadx/tx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
 target_link_libraries(threadx PRIVATE project_compiler_settings)
 
+set(FX_USER_FILE ${PROJECT_SOURCE_DIR}/src/runtime/filex/fx_user.h)
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/filex)
+target_link_libraries(filex PRIVATE project_compiler_settings)
+
 target_compile_definitions(threadx PUBLIC TX_ENABLE_STACK_CHECKING TX_LINUX_MULTI_CORE)
 
 find_package(Threads REQUIRED)
@@ -13,6 +17,7 @@ add_library(platform INTERFACE)
 
 target_link_libraries(platform
     INTERFACE
+        filex
         threadx
         Threads::Threads
         rt

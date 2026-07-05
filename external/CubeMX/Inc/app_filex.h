@@ -1,9 +1,10 @@
+
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file    app_azure_rtos_config.h
+  * @file    app_filex.h
   * @author  MCD Application Team
-  * @brief   azure_rtos config header file
+  * @brief   FileX applicative header file
   ******************************************************************************
   * @attention
   *
@@ -16,12 +17,11 @@
   *
   ******************************************************************************
   */
-
 /* USER CODE END Header */
-
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef APP_AZURE_RTOS_CONFIG_H
-#define APP_AZURE_RTOS_CONFIG_H
+#ifndef __APP_FILEX_H__
+#define __APP_FILEX_H__
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,6 +31,8 @@ extern "C" {
 /* USER CODE END 1 */
 
 /* Includes ------------------------------------------------------------------*/
+#include "fx_api.h"
+#include "fx_stm32_sram_driver.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -43,14 +45,6 @@ extern "C" {
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
-/* Using static memory allocation via threadX Byte memory pools */
-
-#define USE_STATIC_ALLOCATION                    1
-
-#define TX_APP_MEM_POOL_SIZE                     10*1024
-
-#define FX_APP_MEM_POOL_SIZE                     1024
-
 /* USER CODE BEGIN EC */
 
 /* USER CODE END EC */
@@ -61,11 +55,52 @@ extern "C" {
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
+UINT MX_FileX_Init(VOID *memory_ptr);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+/* Main thread Name */
+#ifndef FX_APP_THREAD_NAME
+  #define FX_APP_THREAD_NAME "FileX app thread"
+#endif
+
+/* Main thread time slice */
+#ifndef FX_APP_THREAD_TIME_SLICE
+  #define FX_APP_THREAD_TIME_SLICE TX_NO_TIME_SLICE
+#endif
+
+/* Main thread auto start */
+#ifndef FX_APP_THREAD_AUTO_START
+  #define FX_APP_THREAD_AUTO_START TX_AUTO_START
+#endif
+
+/* Main thread preemption threshold */
+#ifndef FX_APP_PREEMPTION_THRESHOLD
+  #define FX_APP_PREEMPTION_THRESHOLD FX_APP_THREAD_PRIO
+#endif
+
+/* fx sram volume name */
+#ifndef FX_SRAM_VOLUME_NAME
+  #define FX_SRAM_VOLUME_NAME "SRAM_FLASH_DISK"
+#endif
+
+/* fx sram number of bytes per sector */
+#ifndef FX_SRAM_SECTOR_SIZE
+  #define FX_SRAM_SECTOR_SIZE 512
+#endif
+
+/* fx sram number of FATs */
+#ifndef FX_SRAM_NUMBER_OF_FATS
+  #define FX_SRAM_NUMBER_OF_FATS 1
+#endif
+
+/* fx sram Hidden sectors */
+#ifndef FX_SRAM_HIDDEN_SECTORS
+  #define FX_SRAM_HIDDEN_SECTORS 0
+#endif
+
 /* USER CODE BEGIN PD */
 
 /* USER CODE END PD */
@@ -73,9 +108,7 @@ extern "C" {
 /* USER CODE BEGIN 2 */
 
 /* USER CODE END 2 */
-
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* APP_AZURE_RTOS_CONFIG_H */
+#endif /* __APP_FILEX_H__ */
