@@ -50,8 +50,8 @@ namespace hal::board
                 static const auto led{ make_led({ .port = B, .number = 0U }) };
                 return led;
             }
-            case Blue: {
-                static const auto led{ make_led({ .port = B, .number = 7U }) };
+            case Yellow: {
+                static const auto led{ make_led({ .port = E, .number = 1U }) };
                 return led;
             }
             case Red: {

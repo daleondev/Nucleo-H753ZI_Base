@@ -54,13 +54,13 @@ namespace hal
 
         static auto dispatchPeriodElapsed(TIM_HandleTypeDef* handle) noexcept -> void;
 
+        auto setPeriodElapsedCallback(PeriodElapsedCallback callback) noexcept -> void override;
+
       private:
         [[nodiscard]] auto durationToTicksImpl(std::chrono::nanoseconds duration) const noexcept
           -> Tick override;
 
         auto setPeriodImpl(std::chrono::nanoseconds duration) noexcept -> void override;
-
-        auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void override;
 
         auto markStateChange() noexcept -> void;
 

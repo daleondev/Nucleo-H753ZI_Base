@@ -91,6 +91,12 @@ TEST(HalBoardDevices, NucleoFactoriesAreStableAndInitiallyInactive)
     EXPECT_EQ(green, green_again);
     EXPECT_FALSE(green->isOn());
 
+    const auto yellow{ hal::board::createLed(hal::board::LedId::Yellow) };
+    const auto yellow_again{ hal::board::createLed(hal::board::LedId::Yellow) };
+    ASSERT_NE(yellow, nullptr);
+    EXPECT_EQ(yellow, yellow_again);
+    EXPECT_FALSE(yellow->isOn());
+
     const auto button{ hal::board::createButton(hal::board::ButtonId::User) };
     const auto button_again{ hal::board::createButton(hal::board::ButtonId::User) };
     ASSERT_NE(button, nullptr);

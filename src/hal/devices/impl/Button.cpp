@@ -16,7 +16,7 @@ namespace hal::device
 
     Button::~Button() { m_input->clearEdgeCallback(); }
 
-    auto Button::state() const noexcept -> ButtonState { return stateFromLevel(m_input->read()); }
+    auto Button::state() const noexcept -> State { return stateFromLevel(m_input->read()); }
 
     auto Button::setStateChangedCallback(StateChangedCallback callback) noexcept -> void
     {
@@ -27,12 +27,12 @@ namespace hal::device
 
         m_input->setEdgeCallback(
           [active_level = m_activeLevel, callback = std::move(callback)](gpio::Level level) mutable noexcept {
-              callback(level == active_level ? ButtonState::Pressed : ButtonState::Released);
-          });
+            callback(level == active_level ? State::Pressed : State::Released);
+        });
     }
 
-    auto Button::stateFromLevel(gpio::Level level) const noexcept -> ButtonState
+    auto Button::stateFromLevel(gpio::Level level) const noexcept -> State
     {
-        return level == m_activeLevel ? ButtonState::Pressed : ButtonState::Released;
+        return level == m_activeLevel ? State::Pressed : State::Released;
     }
 }

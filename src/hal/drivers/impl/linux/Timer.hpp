@@ -53,11 +53,12 @@ namespace hal
 
         [[nodiscard]] auto getElapsedTime() const noexcept -> std::chrono::nanoseconds override;
 
+        auto setPeriodElapsedCallback(PeriodElapsedCallback callback) noexcept -> void override;
+
       private:
         [[nodiscard]] auto durationToTicksImpl(std::chrono::nanoseconds duration) const noexcept
           -> Tick override;
         auto setPeriodImpl(std::chrono::nanoseconds duration) noexcept -> void override;
-        auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void override;
 
         [[nodiscard]] auto counterAt(std::uint64_t monotonic_nanoseconds) const noexcept -> Tick;
         [[nodiscard]] auto durationToTicksUnlocked(std::chrono::nanoseconds duration) const noexcept -> Tick;

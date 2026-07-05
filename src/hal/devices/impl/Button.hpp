@@ -13,11 +13,11 @@ namespace hal::device
         Button(std::shared_ptr<IDigitalInput> input, gpio::Level active_level);
         ~Button() override;
 
-        [[nodiscard]] auto state() const noexcept -> ButtonState override;
+        [[nodiscard]] auto state() const noexcept -> State override;
         auto setStateChangedCallback(StateChangedCallback callback) noexcept -> void override;
 
       private:
-        [[nodiscard]] auto stateFromLevel(gpio::Level level) const noexcept -> ButtonState;
+        [[nodiscard]] auto stateFromLevel(gpio::Level level) const noexcept -> State;
 
         std::shared_ptr<IDigitalInput> m_input;
         gpio::Level m_activeLevel;

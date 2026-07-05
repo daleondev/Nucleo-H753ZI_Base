@@ -12,6 +12,7 @@
 #include <ctime>
 #include <limits>
 #include <thread>
+#include <utility>
 
 using namespace std::chrono_literals;
 
@@ -166,6 +167,16 @@ TEST(HalClockDrivers, LinuxTimerInterruptUsesRemainingCounterPeriod)
     const std::int64_t fired_at{ callback_time.load(std::memory_order_acquire) };
     ASSERT_GE(fired_at, 0);
     EXPECT_LT(fired_at - started_at, 150ms / 1ns);
+}
+
+TEST(HalClockDrivers, TimerAcceptsTypeErasedPeriodElapsedCallback)
+{
+    hal::Timer timer{ hal::Timer::Configuration{
+      .input_frequency_hz = 1'000U, .prescaler = 0U, .auto_reload = 99U } };
+    hal::ITimer::PeriodElapsedCallback callback{ []() noexcept {} };
+
+    timer.setPeriodElapsedCallback(std::move(callback));
+    timer.clearPeriodElapsedCallback();
 }
 
 TEST(HalClockDrivers, ChronoFallsBackAfterTimerStateChange)

@@ -295,7 +295,7 @@ namespace hal
         return std::chrono::nanoseconds{ static_cast<std::int64_t>(nanoseconds) };
     }
 
-    auto Timer::setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void
+    auto Timer::setPeriodElapsedCallback(PeriodElapsedCallback callback) noexcept -> void
     {
         std::shared_ptr<PeriodElapsedCallback> replacement;
         if (callback) {

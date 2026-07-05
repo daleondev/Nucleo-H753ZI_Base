@@ -191,7 +191,7 @@ namespace hal
         return std::chrono::nanoseconds{ static_cast<std::int64_t>(nanoseconds) };
     }
 
-    auto Timer::setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void
+    auto Timer::setPeriodElapsedCallback(PeriodElapsedCallback callback) noexcept -> void
     {
         const bool restore_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
         HAL_NVIC_DisableIRQ(m_interrupt);

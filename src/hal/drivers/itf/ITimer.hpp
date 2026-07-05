@@ -11,16 +11,6 @@
 
 namespace hal
 {
-
-    namespace detail
-    {
-        template<typename Func, typename... Args>
-        concept NothrowPeriodElapsedCallback =
-          std::is_nothrow_constructible_v<std::remove_cvref_t<Func>, Func&&> &&
-          (std::is_nothrow_constructible_v<std::remove_cvref_t<Args>, Args&&> && ...) &&
-          std::is_nothrow_invocable_v<std::remove_cvref_t<Func>&, std::remove_cvref_t<Args>&...>;
-    }
-
     class ITimer
     {
       public:
@@ -71,19 +61,8 @@ namespace hal
 
         [[nodiscard]] virtual auto getElapsedTime() const noexcept -> std::chrono::nanoseconds = 0;
 
-        template<typename Func, typename... Args>
-            requires detail::NothrowPeriodElapsedCallback<Func, Args...>
-        auto setPeriodElapsedCallback(Func&& callback, Args&&... args) -> void
-        {
-            PeriodElapsedCallback bound_callback{ [cb = std::forward<Func>(callback),
-                                                   ... bound_args =
-                                                     std::forward<Args>(args)]() mutable noexcept -> void {
-                std::invoke(cb, bound_args...);
-            } };
-            setPeriodElapsedCallbackImpl(std::move(bound_callback));
-        }
-
-        auto clearPeriodElapsedCallback() noexcept -> void { setPeriodElapsedCallbackImpl({}); }
+        virtual auto setPeriodElapsedCallback(PeriodElapsedCallback callback) noexcept -> void = 0;
+        auto clearPeriodElapsedCallback() noexcept -> void { setPeriodElapsedCallback({}); }
 
       protected:
         ITimer() = default;
@@ -92,7 +71,5 @@ namespace hal
           -> Tick = 0;
 
         virtual auto setPeriodImpl(std::chrono::nanoseconds duration) noexcept -> void = 0;
-
-        virtual auto setPeriodElapsedCallbackImpl(PeriodElapsedCallback callback) noexcept -> void = 0;
     };
 }

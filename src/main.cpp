@@ -3,6 +3,7 @@
 #include "hal/hal.hpp"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +44,9 @@ namespace
     constexpr auto CYCLE_INTERVAL{ 500ms };
     constexpr auto FAILURE_BLINK_INTERVAL{ 100ms };
 
+    static_assert(std::atomic_bool::is_always_lock_free);
+    std::atomic_bool user_button_press_pending{};
+
     auto debug(std::string_view message) -> void
     {
         static_cast<void>(std::fwrite(message.data(), sizeof(char), message.size(), stdout));
@@ -60,6 +64,19 @@ namespace
         static_cast<void>(std::printf(pattern, arguments...));
         static_cast<void>(std::putchar('\n'));
         static_cast<void>(std::fflush(stdout));
+    }
+
+    auto report_user_button_press() -> void
+    {
+        static const auto yellow_led{ hal::board::createLed(hal::board::LedId::Yellow) };
+        if (yellow_led == nullptr) {
+            Error_Handler();
+        }
+
+        if (user_button_press_pending.exchange(false, std::memory_order_acq_rel)) {
+            debug("[input] user button pressed");
+            yellow_led->toggle();
+        }
     }
 
     [[nodiscard]] constexpr auto duplex_name(hal::IEthernet::Duplex duplex) noexcept -> const char*
@@ -148,6 +165,7 @@ namespace
         debug("[ethercat] waiting up to %zu ms for link",
               static_cast<std::size_t>(LINK_ATTEMPTS) * static_cast<std::size_t>(LINK_POLL_INTERVAL.count()));
         for (unsigned int attempt{}; attempt < LINK_ATTEMPTS; ++attempt) {
+            report_user_button_press();
             const auto link{ ethernet.getLinkInfo() };
             if (link && link->up) {
                 debug("[ethercat] link up: %lu Mbit/s, %s duplex",
@@ -219,6 +237,7 @@ namespace
         }
         debug("[ethercat] TEST FAILED - red LED indicates failure");
         while (true) {
+            report_user_button_press();
             red_led->toggle();
             std::this_thread::sleep_for(FAILURE_BLINK_INTERVAL);
         }
@@ -238,6 +257,17 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 #else
     debug("[ethercat] raw-frame test starting on STM32 Ethernet peripheral");
 #endif
+
+    const auto user_button{ hal::board::createButton(hal::board::ButtonId::User) };
+    if (user_button == nullptr) {
+        debug("[input] user button creation failed");
+        indicate_failure();
+    }
+    user_button->setStateChangedCallback([](hal::device::IButton::State state) noexcept {
+        if (state == hal::device::IButton::State::Pressed) {
+            user_button_press_pending.store(true, std::memory_order_release);
+        }
+    });
 
     const auto ethernet{ hal::ethernet::create(configuration) };
     if (!ethernet) {
@@ -263,6 +293,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
     }
     std::uint8_t datagram_index{};
     while (exchange_probe(*ethernet, datagram_index++)) {
+        report_user_button_press();
         green_led->toggle();
         std::this_thread::sleep_for(CYCLE_INTERVAL);
     }

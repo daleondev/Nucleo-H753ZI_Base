@@ -11,7 +11,7 @@ namespace hal::board
     enum class LedId : std::uint8_t
     {
         Green,
-        Blue,
+        Yellow,
         Red
     };
 
