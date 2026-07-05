@@ -14,6 +14,10 @@
 #undef _GLIBCXX_USE_PTHREAD_COND_CLOCKWAIT
 #undef _GLIBCXX_USE_PTHREAD_RWLOCK_CLOCKLOCK
 
+/* Keep sleep_for in the same ThreadX clock domain as steady_clock. The Linux
+ * libstdc++ configuration otherwise calls nanosleep directly. */
+#undef _GLIBCXX_USE_NANOSLEEP
+
 #undef _GLIBCXX_USE_PTHREAD_MUTEX_CLOCKLOCK
 #define _GLIBCXX_USE_PTHREAD_MUTEX_CLOCKLOCK 0
 

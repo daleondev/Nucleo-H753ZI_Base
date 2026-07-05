@@ -48,10 +48,6 @@ TEST(HalEthernet, LinuxBackendValidatesStateWithoutRawSocketPrivileges)
     EXPECT_FALSE(ethernet->isRunning());
     EXPECT_TRUE(ethernet->stop().has_value());
 
-    const auto link{ ethernet->getLinkInfo() };
-    ASSERT_TRUE(link.has_value());
-    EXPECT_TRUE(link->up);
-
     std::array<std::byte, hal::IEthernet::ETHERNET_HEADER_SIZE> frame{};
     const auto transmit{ ethernet->transmit(frame, 0ms) };
     ASSERT_FALSE(transmit.has_value());
@@ -60,6 +56,15 @@ TEST(HalEthernet, LinuxBackendValidatesStateWithoutRawSocketPrivileges)
     const auto receive{ ethernet->receive(frame, 0ms) };
     ASSERT_FALSE(receive.has_value());
     EXPECT_EQ(receive.error(), std::make_error_code(std::errc::not_connected));
+
+    const auto link{ ethernet->getLinkInfo() };
+    if (!link &&
+        (link.error() == std::make_error_code(std::errc::operation_not_permitted) ||
+         link.error() == std::make_error_code(std::errc::permission_denied))) {
+        GTEST_SKIP() << "network control sockets are unavailable";
+    }
+    ASSERT_TRUE(link.has_value());
+    EXPECT_TRUE(link->up);
 }
 
 TEST(HalEthernet, RejectsInvalidInterfaceNameBeforeOpeningRawSocket)

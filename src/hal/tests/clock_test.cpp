@@ -31,6 +31,15 @@ namespace
         }
         return static_cast<std::int64_t>(now.tv_sec) * hal::IRtc::NANOSECONDS_PER_SECOND + now.tv_nsec;
     }
+
+    [[nodiscard]] auto realtime_nanoseconds() -> std::int64_t
+    {
+        timespec now{};
+        if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+            return -1;
+        }
+        return static_cast<std::int64_t>(now.tv_sec) * hal::IRtc::NANOSECONDS_PER_SECOND + now.tv_nsec;
+    }
 }
 
 TEST(HalClockDrivers, RtcSupportsConcurrentReaders)
@@ -83,22 +92,20 @@ TEST(HalClockDrivers, RtcProvidesRealtime)
     const auto rtc{ hal::rtc::create() };
     ASSERT_NE(rtc, nullptr);
 
+    const auto realtime_before{ realtime_nanoseconds() };
     const auto before{ rtc->getTime() };
+    const auto realtime_after{ realtime_nanoseconds() };
     ASSERT_TRUE(before.has_value());
+    ASSERT_GE(realtime_before, 0);
+    ASSERT_GE(realtime_after, 0);
     EXPECT_LT(before->nanoseconds, hal::IRtc::NANOSECONDS_PER_SECOND);
+    EXPECT_GE(total_nanoseconds(*before), realtime_before);
+    EXPECT_LE(total_nanoseconds(*before), realtime_after);
 
     std::this_thread::sleep_for(2ms);
-
-    const auto system_time{ std::chrono::system_clock::now().time_since_epoch() };
-    const auto system_nanoseconds{
-        std::chrono::duration_cast<std::chrono::nanoseconds>(system_time).count()
-    };
-
     const auto after{ rtc->getTime() };
     ASSERT_TRUE(after.has_value());
 
-    EXPECT_GE(system_nanoseconds, total_nanoseconds(*before));
-    EXPECT_LE(system_nanoseconds, total_nanoseconds(*after));
     EXPECT_GT(total_nanoseconds(*after), total_nanoseconds(*before));
 }
 
@@ -228,10 +235,15 @@ TEST(HalClockDrivers, ChronoFallsBackAfterTimerStateChange)
         EXPECT_TRUE(valid);
     }
 
-    std::this_thread::sleep_for(4ms);
-    const auto after{ std::chrono::system_clock::now() };
+    constexpr auto minimum_progress{ 3ms };
+    const auto progress_deadline{ std::chrono::steady_clock::now() + 100ms };
+    auto after{ std::chrono::system_clock::now() };
+    while (after - before < minimum_progress && std::chrono::steady_clock::now() < progress_deadline) {
+        std::this_thread::sleep_for(1ms);
+        after = std::chrono::system_clock::now();
+    }
 
     EXPECT_GT(after, before);
-    EXPECT_GE(after - before, 3ms);
+    EXPECT_GE(after - before, minimum_progress);
     ASSERT_TRUE(timer->start().has_value());
 }

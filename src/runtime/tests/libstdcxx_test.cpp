@@ -473,7 +473,9 @@ TEST(RuntimeLibstdcxx, ContendedStaticInitialization)
 
 TEST(RuntimeLibstdcxx, FailedStaticInitializationCanBeRetried)
 {
-    EXPECT_THROW(static_cast<void>(retrying_static()), std::runtime_error);
+    if (retrying_static_attempts.load() == 0U) {
+        EXPECT_THROW(static_cast<void>(retrying_static()), std::runtime_error);
+    }
     EXPECT_EQ(retrying_static(), PROMISE_VALUE);
     EXPECT_EQ(retrying_static_attempts.load(), 2U);
 }
@@ -481,6 +483,7 @@ TEST(RuntimeLibstdcxx, FailedStaticInitializationCanBeRetried)
 TEST(RuntimeLibstdcxx, ThreadLocalStorageAndConcurrentExceptions)
 {
     constexpr std::size_t worker_count{ 2U };
+    const auto destructor_count_before{ thread_local_destructor_count.load() };
     thread_local_state.value = PROMISE_VALUE;
     ThreadLocalState* const main_state{ &thread_local_state };
 
@@ -518,7 +521,7 @@ TEST(RuntimeLibstdcxx, ThreadLocalStorageAndConcurrentExceptions)
 
     EXPECT_EQ(thread_local_state.value, PROMISE_VALUE);
     EXPECT_EQ(&thread_local_state, main_state);
-    EXPECT_EQ(thread_local_destructor_count.load(), worker_count);
+    EXPECT_EQ(thread_local_destructor_count.load() - destructor_count_before, worker_count);
     for (std::size_t index{}; index < worker_count; ++index) {
         EXPECT_NE(states[index], main_state);
         EXPECT_TRUE(passed[index]);
