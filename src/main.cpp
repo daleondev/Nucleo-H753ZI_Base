@@ -5,7 +5,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <span>
+#include <string_view>
 #include <thread>
 
 namespace
@@ -38,6 +40,40 @@ namespace
     constexpr auto FRAME_TIMEOUT{ 100ms };
     constexpr auto CYCLE_INTERVAL{ 500ms };
     constexpr auto FAILURE_BLINK_INTERVAL{ 100ms };
+
+    auto debug(std::string_view message) -> void
+    {
+        static_cast<void>(std::fwrite(message.data(), sizeof(char), message.size(), stdout));
+        static_cast<void>(std::putchar('\n'));
+        static_cast<void>(std::fflush(stdout));
+    }
+
+    template<typename... Arguments>
+        requires(sizeof...(Arguments) > 0U)
+    auto debug(const char* pattern, Arguments... arguments) -> void
+    {
+        // This is the single type-unsafe boundary for the lightweight debug
+        // output. Keeping printf here avoids linking the full std::format engine.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+        static_cast<void>(std::printf(pattern, arguments...));
+        static_cast<void>(std::putchar('\n'));
+        static_cast<void>(std::fflush(stdout));
+    }
+
+    [[nodiscard]] constexpr auto duplex_name(hal::IEthernet::Duplex duplex) noexcept
+      -> const char*
+    {
+        switch (duplex) {
+            using enum hal::IEthernet::Duplex;
+            case Half:
+                return "half";
+            case Full:
+                return "full";
+            case Unknown:
+                return "unknown";
+        }
+        return "unknown";
+    }
 
     auto write_little_endian(std::span<std::byte> bytes,
                              std::size_t offset,
@@ -98,8 +134,7 @@ namespace
             read_little_endian(frame, ADDRESS_POSITION_OFFSET) != 0U ||
             read_little_endian(frame, ADDRESS_REGISTER_OFFSET) != AL_STATUS_REGISTER ||
             (read_little_endian(frame, DATAGRAM_LENGTH_OFFSET) & DATAGRAM_LENGTH_MASK) !=
-              AL_STATUS_SIZE ||
-            read_little_endian(frame, WORKING_COUNTER_OFFSET) == 0U) {
+              AL_STATUS_SIZE) {
             return false;
         }
 
@@ -114,32 +149,65 @@ namespace
 
     [[nodiscard]] auto wait_for_link(const hal::IEthernet& ethernet) -> bool
     {
+        debug("[ethercat] waiting up to %zu ms for link",
+              static_cast<std::size_t>(LINK_ATTEMPTS) *
+                static_cast<std::size_t>(LINK_POLL_INTERVAL.count()));
         for (unsigned int attempt{}; attempt < LINK_ATTEMPTS; ++attempt) {
             const auto link{ ethernet.getLinkInfo() };
             if (link && link->up) {
+                debug("[ethercat] link up: %lu Mbit/s, %s duplex",
+                      static_cast<unsigned long>(link->speed_mbps),
+                      duplex_name(link->duplex));
                 return true;
             }
             std::this_thread::sleep_for(LINK_POLL_INTERVAL);
         }
+        debug("[ethercat] link did not come up");
         return false;
     }
 
     [[nodiscard]] auto exchange_probe(hal::IEthernet& ethernet, std::uint8_t index) -> bool
     {
         const auto probe{ make_probe(index) };
-        if (!ethernet.transmit(probe, FRAME_TIMEOUT)) {
+        const auto transmitted{ ethernet.transmit(probe, FRAME_TIMEOUT) };
+        if (!transmitted) {
+            debug("[ethercat] TX failed: error %d", transmitted.error().value());
             return false;
         }
+        debug("[ethercat] TX index=%u bytes=%zu", static_cast<unsigned int>(index), probe.size());
 
         std::array<std::byte, hal::IEthernet::MAX_FRAME_SIZE> response{};
         const auto received{ ethernet.receive(response, FRAME_TIMEOUT) };
-        return received && valid_response(std::span<const std::byte>{ response.data(), *received },
-                                          index,
-                                          ethernet.getMacAddress());
+        if (!received) {
+            debug("[ethercat] RX failed: error %d", received.error().value());
+            return false;
+        }
+
+        const std::span<const std::byte> frame{ response.data(), *received };
+        if (!valid_response(frame, index, ethernet.getMacAddress())) {
+            debug("[ethercat] RX rejected: invalid frame, index=%u, bytes=%zu",
+                  static_cast<unsigned int>(index),
+                  *received);
+            return false;
+        }
+
+        const std::uint16_t working_counter{ read_little_endian(frame, WORKING_COUNTER_OFFSET) };
+        const std::uint16_t al_status{ read_little_endian(frame, DATA_OFFSET) };
+        debug("[ethercat] RX index=%u bytes=%zu WKC=%u AL status=0x%04X",
+              static_cast<unsigned int>(index),
+              *received,
+              static_cast<unsigned int>(working_counter),
+              static_cast<unsigned int>(al_status));
+        if (working_counter == 0U) {
+            debug("[ethercat] RX rejected: no EtherCAT slave processed the datagram");
+            return false;
+        }
+        return true;
     }
 
     [[noreturn]] auto indicate_failure() -> void
     {
+        debug("[ethercat] TEST FAILED - red LED indicates failure");
         while (true) {
             if (BSP_LED_Toggle(LED_RED) != BSP_ERROR_NONE) {
                 Error_Handler();
@@ -156,13 +224,30 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
     if (argc > 1 && argv[1] != nullptr) {
         configuration.interface_name = argv[1];
     }
+    debug("[ethercat] raw-frame test starting on interface '%.*s'",
+          static_cast<int>(configuration.interface_name.size()),
+          configuration.interface_name.data());
+#else
+    debug("[ethercat] raw-frame test starting on STM32 Ethernet peripheral");
 #endif
 
     const auto ethernet{ hal::ethernet::create(configuration) };
-    if (!ethernet || !ethernet->start() || !wait_for_link(*ethernet)) {
+    if (!ethernet) {
+        debug("[ethercat] driver creation failed");
         indicate_failure();
     }
 
+    const auto started{ ethernet->start() };
+    if (!started) {
+        debug("[ethercat] driver start failed: error %d", started.error().value());
+        indicate_failure();
+    }
+    if (!wait_for_link(*ethernet)) {
+        indicate_failure();
+    }
+
+    debug("[ethercat] sending BRD probes for AL Status register 0x%04X",
+          static_cast<unsigned int>(AL_STATUS_REGISTER));
     std::uint8_t datagram_index{};
     while (exchange_probe(*ethernet, datagram_index++)) {
         if (BSP_LED_Toggle(LED_GREEN) != BSP_ERROR_NONE) {
