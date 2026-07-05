@@ -29,7 +29,6 @@ target_sources(platform
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_hal_msp.c
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/stm32h7xx_hal_timebase_tim.c
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/sysmem.c
-        ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/syscalls.c
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/system_stm32h7xx.c
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Src/tx_initialize_low_level.S
         ${PROJECT_SOURCE_DIR}/external/CubeMX/startup_stm32h753xx.s

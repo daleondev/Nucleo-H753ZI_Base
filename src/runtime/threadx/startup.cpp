@@ -12,6 +12,7 @@
 // NOLINTNEXTLINE(bugprone-reserved-identifier)
 extern "C" int __real_main(int argc, char** argv);
 extern "C" void runtime_application_define() __attribute__((weak));
+extern "C" void runtime_filex_initialize();
 
 namespace
 {
@@ -51,6 +52,9 @@ namespace
     auto application_thread_entry(ULONG input) noexcept -> void
     {
         static_cast<void>(input);
+#if defined(HAL_PLATFORM_STM32)
+        runtime_filex_initialize();
+#endif
         int exit_status{};
         try {
             exit_status = __real_main(application_argc, application_argv);

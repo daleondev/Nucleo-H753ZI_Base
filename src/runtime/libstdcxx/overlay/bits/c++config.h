@@ -5,6 +5,16 @@
 
 #if defined(THREADX_STD_ENABLED)
 
+#if defined(HAL_PLATFORM_STM32)
+/* The FileX Newlib retarget supplies these POSIX interfaces. */
+#define _GLIBCXX_HAVE_DIRENT_H 1
+#define _GLIBCXX_HAVE_STRUCT_DIRENT_D_TYPE 1
+#define _GLIBCXX_USE_MKDIR 1
+#define _GLIBCXX_USE_GETCWD 1
+#define _GLIBCXX_USE_CHDIR 1
+#define _GLIBCXX_HAVE_SYS_STATVFS_H 1
+#endif
+
 /* The Linux libstdc++ configuration enables pthread and futex fast paths
  * that bypass gthreads. They are incompatible with the ThreadX handle types
  * supplied by this overlay, so force the generic gthread implementations. */

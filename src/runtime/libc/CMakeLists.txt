@@ -10,8 +10,16 @@ target_link_libraries(runtime_libc
     PRIVATE
         hal
     PUBLIC
+        runtime::filex
         threadx
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    target_include_directories(runtime_libc
+        BEFORE PUBLIC
+            ${PROJECT_SOURCE_DIR}/src/runtime/filex/overlay
+    )
+endif()
 
 target_include_directories(runtime_libc
     PRIVATE

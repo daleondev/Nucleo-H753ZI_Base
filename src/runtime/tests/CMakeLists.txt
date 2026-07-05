@@ -25,7 +25,6 @@ add_executable(runtime_tests)
 
 target_sources(runtime_tests
     PRIVATE
-        ${PROJECT_SOURCE_DIR}/src/filex/ram_disk_sample.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/filex_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libc_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libstdcxx_test.cpp

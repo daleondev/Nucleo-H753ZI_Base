@@ -18,9 +18,19 @@ target_sources(runtime_libstdcxx
         ${CMAKE_CURRENT_SOURCE_DIR}/tls.cpp
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    target_sources(runtime_libstdcxx
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/gcc-15.2.0/c++17/fs_ops.cc
+            ${CMAKE_CURRENT_SOURCE_DIR}/gcc-15.2.0/c++17/fs_dir.cc
+    )
+endif()
+
 target_include_directories(runtime_libstdcxx
     BEFORE PUBLIC
         ${PROJECT_SOURCE_DIR}/src
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:${PROJECT_SOURCE_DIR}/src/runtime/filex/overlay>
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:${CMAKE_CURRENT_SOURCE_DIR}/gcc-15.2.0>
         ${CMAKE_CURRENT_SOURCE_DIR}/overlay
 )
 
@@ -28,6 +38,7 @@ target_link_libraries(runtime_libstdcxx
     PRIVATE
         hal
     PUBLIC
+        runtime::filex
         threadx
         project_compiler_settings
 )
