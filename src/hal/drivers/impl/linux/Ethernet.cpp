@@ -20,6 +20,7 @@
 #include <exception>
 #include <limits>
 #include <system_error>
+#include <utility>
 
 // This file is the POSIX ABI boundary. These casts and C-array conversions are
 // required by socket, ioctl, and BPF interfaces.
@@ -32,6 +33,11 @@ namespace hal
     {
         constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
         constexpr std::uint64_t NANOSECONDS_PER_MILLISECOND{ 1'000'000ULL };
+
+        [[nodiscard]] constexpr auto ether_type_value(IEthernet::EtherType type) noexcept -> std::uint16_t
+        {
+            return std::to_underlying(type);
+        }
 
         class PthreadLock
         {
@@ -124,15 +130,26 @@ namespace hal
         {
             std::array<sock_filter, 12U> instructions{{
                 BPF_STMT(BPF_LD | BPF_H | BPF_ABS, 12U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, configuration.ether_type, 8U, 0U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IEthernet::VLAN_ETHER_TYPE, 1U, 0U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IEthernet::SERVICE_VLAN_ETHER_TYPE, 0U, 7U),
+                BPF_JUMP(
+                  BPF_JMP | BPF_JEQ | BPF_K, ether_type_value(configuration.ether_type), 8U, 0U),
+                BPF_JUMP(
+                  BPF_JMP | BPF_JEQ | BPF_K, ether_type_value(IEthernet::EtherType::VLAN), 1U, 0U),
+                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                         ether_type_value(IEthernet::EtherType::SERVICE_VLAN),
+                         0U,
+                         7U),
                 BPF_STMT(BPF_LD | BPF_H | BPF_ABS, 16U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, configuration.ether_type, 4U, 0U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IEthernet::VLAN_ETHER_TYPE, 1U, 0U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, IEthernet::SERVICE_VLAN_ETHER_TYPE, 0U, 3U),
+                BPF_JUMP(
+                  BPF_JMP | BPF_JEQ | BPF_K, ether_type_value(configuration.ether_type), 4U, 0U),
+                BPF_JUMP(
+                  BPF_JMP | BPF_JEQ | BPF_K, ether_type_value(IEthernet::EtherType::VLAN), 1U, 0U),
+                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                         ether_type_value(IEthernet::EtherType::SERVICE_VLAN),
+                         0U,
+                         3U),
                 BPF_STMT(BPF_LD | BPF_H | BPF_ABS, 20U),
-                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, configuration.ether_type, 0U, 1U),
+                BPF_JUMP(
+                  BPF_JMP | BPF_JEQ | BPF_K, ether_type_value(configuration.ether_type), 0U, 1U),
                 BPF_STMT(BPF_RET | BPF_K, 0xFFFFU),
                 BPF_STMT(BPF_RET | BPF_K, 0U),
             }};
@@ -374,7 +391,8 @@ namespace hal
 
         sockaddr_ll destination{};
         destination.sll_family = AF_PACKET;
-        destination.sll_protocol = htons(frameOuterEtherType(frame).value_or(ETH_P_ALL));
+        const auto outer_type{ frameOuterEtherType(frame) };
+        destination.sll_protocol = htons(outer_type ? ether_type_value(*outer_type) : ETH_P_ALL);
         destination.sll_ifindex = static_cast<int>(interface_index);
         destination.sll_halen = ETH_ALEN;
         std::memcpy(destination.sll_addr, packet.data(), ETH_ALEN);

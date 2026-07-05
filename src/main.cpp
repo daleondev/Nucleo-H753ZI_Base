@@ -1,3 +1,4 @@
+#include "hal/board/board.hpp"
 #include "hal/drivers/factory/ethernet.hpp"
 #include "hal/hal.hpp"
 
@@ -9,6 +10,7 @@
 #include <span>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 namespace
 {
@@ -211,11 +213,13 @@ namespace
 
     [[noreturn]] auto indicate_failure() -> void
     {
+        const auto red_led{ hal::board::createLed(hal::board::LedId::Red) };
+        if (red_led == nullptr) {
+            Error_Handler();
+        }
         debug("[ethercat] TEST FAILED - red LED indicates failure");
         while (true) {
-            if (BSP_LED_Toggle(LED_RED) != BSP_ERROR_NONE) {
-                Error_Handler();
-            }
+            red_led->toggle();
             std::this_thread::sleep_for(FAILURE_BLINK_INTERVAL);
         }
     }
@@ -252,11 +256,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 
     debug("[ethercat] sending BRD probes for AL Status register 0x%04X",
           static_cast<unsigned int>(AL_STATUS_REGISTER));
+    const auto green_led{ hal::board::createLed(hal::board::LedId::Green) };
+    if (green_led == nullptr) {
+        debug("[ethercat] green LED creation failed");
+        indicate_failure();
+    }
     std::uint8_t datagram_index{};
     while (exchange_probe(*ethernet, datagram_index++)) {
-        if (BSP_LED_Toggle(LED_GREEN) != BSP_ERROR_NONE) {
-            Error_Handler();
-        }
+        green_led->toggle();
         std::this_thread::sleep_for(CYCLE_INTERVAL);
     }
     indicate_failure();

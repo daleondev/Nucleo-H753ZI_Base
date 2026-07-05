@@ -33,25 +33,6 @@ typedef enum
 
 typedef enum
 {
-    LED_GREEN = 0,
-    LED_RED,
-    LEDn,
-} Led_TypeDef;
-
-typedef enum
-{
-    BUTTON_USER = 0,
-    BUTTONn,
-} Button_TypeDef;
-
-typedef enum
-{
-    BUTTON_MODE_GPIO = 0,
-    BUTTON_MODE_EXTI = 1,
-} ButtonMode_TypeDef;
-
-typedef enum
-{
     COM1 = 0,
     COMn,
 } COM_TypeDef;
@@ -88,9 +69,6 @@ void MX_TIM2_Init(void);
 void MX_RNG_Init(void);
 void MX_FDCAN1_Init(void);
 
-int32_t BSP_LED_Init(Led_TypeDef led);
-int32_t BSP_LED_Toggle(Led_TypeDef led);
-int32_t BSP_PB_Init(Button_TypeDef button, ButtonMode_TypeDef button_mode);
 int32_t BSP_COM_Init(COM_TypeDef com, COM_InitTypeDef* com_init);
 
 void Error_Handler(void);

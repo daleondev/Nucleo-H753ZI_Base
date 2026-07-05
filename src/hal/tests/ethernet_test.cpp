@@ -18,14 +18,14 @@ TEST(HalEthernet, ParsesRawAndVlanEtherTypes)
     std::array<std::byte, hal::IEthernet::VLAN_HEADER_SIZE> frame{};
     frame[12] = std::byte{ 0x88 };
     frame[13] = std::byte{ 0xA4 };
-    EXPECT_EQ(hal::IEthernet::frameEtherType(frame), hal::IEthernet::ETHERCAT_ETHER_TYPE);
+    EXPECT_EQ(hal::IEthernet::frameEtherType(frame), hal::IEthernet::EtherType::EtherCAT);
 
     frame[12] = std::byte{ 0x81 };
     frame[13] = std::byte{ 0x00 };
     frame[16] = std::byte{ 0x88 };
     frame[17] = std::byte{ 0xA4 };
-    EXPECT_EQ(hal::IEthernet::frameOuterEtherType(frame), hal::IEthernet::VLAN_ETHER_TYPE);
-    EXPECT_EQ(hal::IEthernet::frameEtherType(frame), hal::IEthernet::ETHERCAT_ETHER_TYPE);
+    EXPECT_EQ(hal::IEthernet::frameOuterEtherType(frame), hal::IEthernet::EtherType::VLAN);
+    EXPECT_EQ(hal::IEthernet::frameEtherType(frame), hal::IEthernet::EtherType::EtherCAT);
 
     std::array<std::byte, 22U> stacked_vlan_frame{};
     stacked_vlan_frame[12] = std::byte{ 0x88 };
@@ -34,7 +34,7 @@ TEST(HalEthernet, ParsesRawAndVlanEtherTypes)
     stacked_vlan_frame[17] = std::byte{ 0x00 };
     stacked_vlan_frame[20] = std::byte{ 0x88 };
     stacked_vlan_frame[21] = std::byte{ 0xA4 };
-    EXPECT_EQ(hal::IEthernet::frameEtherType(stacked_vlan_frame), hal::IEthernet::ETHERCAT_ETHER_TYPE);
+    EXPECT_EQ(hal::IEthernet::frameEtherType(stacked_vlan_frame), hal::IEthernet::EtherType::EtherCAT);
 
     EXPECT_EQ(hal::IEthernet::frameEtherType(
                 std::span<const std::byte>{ frame.data(), hal::IEthernet::ETHERNET_HEADER_SIZE }),
