@@ -20,9 +20,12 @@
 #include <sys/stat.h>
 #include <sys/times.h>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 #if defined(HAL_PLATFORM_STM32)
 #include <dirent.h>
+#include <reent.h>
 #include <rng.h>
 #include <sys/statvfs.h>
 #endif
@@ -34,9 +37,16 @@ extern "C" int __io_getchar() __attribute__((weak));
 #if defined(HAL_PLATFORM_STM32)
 struct runtime_filex_directory_stream
 {
+    struct Entry
+    {
+        std::array<char, runtime::filex::MAXIMUM_PATH> name{};
+        std::uint8_t type{};
+    };
+
     bool allocated{};
     long position{};
     std::array<char, runtime::filex::MAXIMUM_PATH> path{};
+    std::vector<Entry> entries;
     dirent entry{};
 };
 #endif
@@ -933,6 +943,74 @@ extern "C" int _truncate(const char* path, off_t length)
 }
 
 #if defined(HAL_PLATFORM_STM32)
+namespace
+{
+    template<typename Result>
+    auto copy_errno_to_reent(_reent* context, Result result) noexcept -> Result
+    {
+        if (result < 0 && context != nullptr) {
+            context->_errno = errno;
+        }
+        return result;
+    }
+}
+
+extern "C" int _open_r(_reent* context, const char* path, int flags, int mode)
+{
+    return copy_errno_to_reent(context, _open(path, flags, mode));
+}
+
+extern "C" int _close_r(_reent* context, int file)
+{
+    return copy_errno_to_reent(context, _close(file));
+}
+
+extern "C" _ssize_t _read_r(_reent* context, int file, void* buffer, std::size_t length)
+{
+    if (length > static_cast<std::size_t>(INT_MAX)) {
+        errno = EINVAL;
+        return copy_errno_to_reent(context, -1);
+    }
+    return copy_errno_to_reent(
+      context, _read(file, static_cast<char*>(buffer), static_cast<int>(length)));
+}
+
+extern "C" _ssize_t _write_r(_reent* context, int file, const void* buffer, std::size_t length)
+{
+    if (length > static_cast<std::size_t>(INT_MAX)) {
+        errno = EINVAL;
+        return copy_errno_to_reent(context, -1);
+    }
+    return copy_errno_to_reent(
+      context, _write(file, static_cast<const char*>(buffer), static_cast<int>(length)));
+}
+
+extern "C" _off_t _lseek_r(_reent* context, int file, _off_t offset, int origin)
+{
+    return static_cast<_off_t>(
+      copy_errno_to_reent(context, _lseek(file, static_cast<off_t>(offset), origin)));
+}
+
+extern "C" int _fstat_r(_reent* context, int file, struct stat* value)
+{
+    return copy_errno_to_reent(context, _fstat(file, value));
+}
+
+extern "C" int _stat_r(_reent* context, const char* path, struct stat* value)
+{
+    return copy_errno_to_reent(context, _stat(path, value));
+}
+
+extern "C" int _unlink_r(_reent* context, const char* path)
+{
+    return copy_errno_to_reent(context, _unlink(path));
+}
+
+extern "C" int _rename_r(_reent* context, const char* old_path, const char* new_path)
+{
+    return copy_errno_to_reent(context, _rename(old_path, new_path));
+}
+
 extern "C" int mkdir(const char* path, mode_t mode) { return _mkdir(path, mode); }
 extern "C" int rmdir(const char* path) { return _rmdir(path); }
 extern "C" int remove(const char* path)
@@ -1094,6 +1172,40 @@ extern "C" DIR* opendir(const char* path)
     *slot = runtime_filex_directory_stream{};
     slot->allocated = true;
     std::memcpy(slot->path.data(), normalized, std::strlen(normalized) + 1U);
+    if (fx_directory_default_set(&media, slot->path.data()) != FX_SUCCESS) {
+        *slot = runtime_filex_directory_stream{};
+        errno = EIO;
+        return nullptr;
+    }
+    char name[MAXIMUM_PATH]{};
+    UINT attributes{};
+    ULONG size{};
+    UINT status{ fx_directory_first_full_entry_find(
+      &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) };
+    try {
+        while (status == FX_SUCCESS) {
+            if (std::strcmp(name, ".") != 0 && std::strcmp(name, "..") != 0) {
+                runtime_filex_directory_stream::Entry entry{};
+                std::memcpy(entry.name.data(), name, std::strlen(name) + 1U);
+                entry.type = (attributes & FX_DIRECTORY) != 0U ? DT_DIR : DT_REG;
+                slot->entries.push_back(std::move(entry));
+            }
+            status = fx_directory_next_full_entry_find(
+              &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+        }
+    }
+    catch (...) {
+        static_cast<void>(fx_directory_default_set(&media, const_cast<CHAR*>("/")));
+        *slot = runtime_filex_directory_stream{};
+        errno = ENOMEM;
+        return nullptr;
+    }
+    static_cast<void>(fx_directory_default_set(&media, const_cast<CHAR*>("/")));
+    if (status != FX_NO_MORE_ENTRIES) {
+        *slot = runtime_filex_directory_stream{};
+        errno = filex_errno(status);
+        return nullptr;
+    }
     return &*slot;
 }
 
@@ -1104,38 +1216,17 @@ extern "C" dirent* readdir(DIR* directory)
         return nullptr;
     }
     const RegistryGuard guard;
-    if (fx_directory_default_set(&media, directory->path.data()) != FX_SUCCESS) {
-        errno = EIO;
+    if (std::cmp_greater_equal(directory->position, directory->entries.size())) {
         return nullptr;
     }
-    long visible_index{};
-    char name[MAXIMUM_PATH]{};
-    UINT attributes{};
-    ULONG size{};
-    UINT status{ fx_directory_first_full_entry_find(
-      &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) };
-    while (status == FX_SUCCESS) {
-        if (std::strcmp(name, ".") != 0 && std::strcmp(name, "..") != 0) {
-            if (visible_index == directory->position) {
-                directory->entry = {};
-                directory->entry.d_ino = static_cast<std::uint32_t>(visible_index + 1);
-                directory->entry.d_reclen = sizeof(dirent);
-                directory->entry.d_type = (attributes & FX_DIRECTORY) != 0U ? DT_DIR : DT_REG;
-                std::memcpy(directory->entry.d_name, name, std::strlen(name) + 1U);
-                ++directory->position;
-                static_cast<void>(fx_directory_default_set(&media, const_cast<CHAR*>("/")));
-                return &directory->entry;
-            }
-            ++visible_index;
-        }
-        status = fx_directory_next_full_entry_find(
-          &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-    }
-    static_cast<void>(fx_directory_default_set(&media, const_cast<CHAR*>("/")));
-    if (status != FX_NO_MORE_ENTRIES) {
-        errno = filex_errno(status);
-    }
-    return nullptr;
+    const auto& snapshot{ directory->entries[static_cast<std::size_t>(directory->position)] };
+    directory->entry = {};
+    directory->entry.d_ino = static_cast<std::uint32_t>(directory->position + 1);
+    directory->entry.d_reclen = sizeof(dirent);
+    directory->entry.d_type = snapshot.type;
+    std::memcpy(directory->entry.d_name, snapshot.name.data(), std::strlen(snapshot.name.data()) + 1U);
+    ++directory->position;
+    return &directory->entry;
 }
 
 extern "C" int closedir(DIR* directory)

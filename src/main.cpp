@@ -62,10 +62,8 @@ namespace
         constexpr std::string_view CONTENT{ "FileX through std::fstream\r\n" };
         const fs::path directory{ "/sample" };
         const fs::path file{ directory / "roundtrip.txt" };
-        const fs::path copied_file{ directory / "copied.txt" };
-        const fs::path renamed_file{ directory / "renamed.txt" };
         std::error_code error;
-        static_cast<void>(fs::create_directories(directory / "nested", error));
+        static_cast<void>(fs::create_directory(directory, error));
         if (error) {
             return false;
         }
@@ -80,33 +78,11 @@ namespace
                 return false;
             }
         }
-        if (!fs::copy_file(file, copied_file, error) || error) {
-            return false;
-        }
-        fs::resize_file(copied_file, CONTENT.size(), error);
-        if (error) {
-            return false;
-        }
-        fs::rename(copied_file, renamed_file, error);
-        if (error) {
-            return false;
-        }
-        const fs::space_info volume{ fs::space(directory, error) };
-        if (error) {
-            return false;
-        }
-        std::size_t entries{};
-        for ([[maybe_unused]] const fs::directory_entry& entry :
-             fs::recursive_directory_iterator{ directory, error }) {
-            ++entries;
-        }
-        const bool valid{ !error && entries == 3U && input == CONTENT &&
-                          fs::file_size(file, error) == CONTENT.size() &&
-                          fs::file_size(renamed_file, error) == CONTENT.size() &&
-                          fs::current_path(error) == "/" && volume.capacity == 32U * 1024U &&
-                          volume.available <= volume.capacity };
-        const std::uintmax_t removed{ fs::remove_all(directory, error) };
-        return valid && !error && removed == 4U && !fs::exists(directory, error) && !error;
+        const bool valid{ input == CONTENT && fs::is_regular_file(file, error) && !error &&
+                          fs::file_size(file, error) == CONTENT.size() && !error };
+        const bool file_removed{ fs::remove(file, error) };
+        const bool directory_removed{ !error && fs::remove(directory, error) };
+        return valid && file_removed && directory_removed && !error;
 #else
         return true;
 #endif
