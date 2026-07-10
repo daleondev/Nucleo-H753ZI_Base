@@ -25,6 +25,12 @@
 
 struct TX_THREAD_STRUCT;
 
+#if defined(__x86_64__)
+typedef unsigned int runtime_thread_entry_parameter_t;
+#else
+typedef unsigned long runtime_thread_entry_parameter_t;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -77,6 +83,9 @@ extern void runtime_tls_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
 #define TX_THREAD_USER_EXTENSION                                      \
     RUNTIME_THREADX_LIBC_USER_EXTENSION                               \
     RUNTIME_THREADX_TLS_USER_EXTENSION                                \
+    void (*tx_thread_runtime_entry)(runtime_thread_entry_parameter_t); \
+    runtime_thread_entry_parameter_t tx_thread_runtime_entry_parameter; \
+    unsigned int tx_thread_runtime_cleanup_started;                   \
     void* tx_thread_runtime_tls_values[RUNTIME_THREAD_KEY_COUNT];     \
     unsigned int tx_thread_runtime_tls_generations[RUNTIME_THREAD_KEY_COUNT];
 

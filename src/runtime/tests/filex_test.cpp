@@ -3,9 +3,11 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <string>
 #include <sys/stat.h>
 #include <thread>
@@ -27,6 +29,11 @@ extern "C" int _ftruncate(int file, off_t length);
 
 namespace
 {
+    std::atomic<int> console_input_calls{};
+    std::atomic<int> console_input_failure_after{ -1 };
+    std::atomic<int> console_output_calls{};
+    std::atomic<int> console_output_failure_after{ -1 };
+
     class FileXTest : public ::testing::Test
     {
       protected:
@@ -39,6 +46,14 @@ namespace
             static_cast<void>(_unlink("/append.bin"));
             static_cast<void>(_unlink("/truncate.bin"));
             static_cast<void>(_unlink("/shared.bin"));
+            static_cast<void>(_unlink("/seek-overflow.bin"));
+            static_cast<void>(_unlink("/rename-source.bin"));
+            static_cast<void>(_unlink("/rename-destination.bin"));
+            static_cast<void>(_unlink("/renamed-cwd/child/relative.bin"));
+            static_cast<void>(_rmdir("/renamed-cwd/child"));
+            static_cast<void>(_rmdir("/renamed-cwd"));
+            static_cast<void>(_rmdir("/original-cwd/child"));
+            static_cast<void>(_rmdir("/original-cwd"));
             static_cast<void>(_rmdir("/directory"));
             for (unsigned index{}; index < 4U; ++index) {
                 const std::string path{ "/concurrent" + std::to_string(index) };
@@ -47,6 +62,20 @@ namespace
             static_cast<void>(runtime::filex::setCurrentPath("/"));
         }
     };
+}
+
+extern "C" int __io_getchar()
+{
+    const int call{ console_input_calls.fetch_add(1, std::memory_order_relaxed) };
+    const int failure_after{ console_input_failure_after.load(std::memory_order_relaxed) };
+    return failure_after >= 0 && call >= failure_after ? -1 : 'x';
+}
+
+extern "C" int __io_putchar(int character)
+{
+    const int call{ console_output_calls.fetch_add(1, std::memory_order_relaxed) };
+    const int failure_after{ console_output_failure_after.load(std::memory_order_relaxed) };
+    return failure_after >= 0 && call >= failure_after ? -1 : character;
 }
 
 TEST_F(FileXTest, NormalizesAbsoluteAndRelativePaths)
@@ -81,6 +110,109 @@ TEST_F(FileXTest, NewlibDescriptorRoundTripAndMetadata)
     EXPECT_EQ(_close(file), 0);
     EXPECT_EQ(_stat("/mode.bin", &metadata), 0);
     EXPECT_TRUE(S_ISREG(metadata.st_mode));
+}
+
+TEST_F(FileXTest, ConsoleIoValidatesBuffersAndReportsPartialTransfers)
+{
+    console_input_calls = 0;
+    console_input_failure_after = -1;
+    console_output_calls = 0;
+    console_output_failure_after = -1;
+
+    EXPECT_EQ(_read(STDIN_FILENO, nullptr, 0), 0);
+    EXPECT_EQ(_write(STDOUT_FILENO, nullptr, 0), 0);
+
+    errno = 0;
+    EXPECT_EQ(_read(STDIN_FILENO, nullptr, 1), -1);
+    EXPECT_EQ(errno, EINVAL);
+    errno = 0;
+    EXPECT_EQ(_write(STDERR_FILENO, nullptr, 1), -1);
+    EXPECT_EQ(errno, EINVAL);
+
+    char input[4]{};
+    console_input_calls = 0;
+    console_input_failure_after = 2;
+    EXPECT_EQ(_read(STDIN_FILENO, input, sizeof(input)), 2);
+    EXPECT_EQ(std::string_view(input, 2), "xx");
+    console_input_calls = 0;
+    console_input_failure_after = 0;
+    errno = 0;
+    EXPECT_EQ(_read(STDIN_FILENO, input, sizeof(input)), -1);
+    EXPECT_EQ(errno, EIO);
+
+    constexpr char output[]{ "abcd" };
+    console_output_calls = 0;
+    console_output_failure_after = 2;
+    EXPECT_EQ(_write(STDOUT_FILENO, output, 4), 2);
+    console_output_calls = 0;
+    console_output_failure_after = 0;
+    errno = 0;
+    EXPECT_EQ(_write(STDOUT_FILENO, output, 4), -1);
+    EXPECT_EQ(errno, EIO);
+
+    console_input_failure_after = -1;
+    console_output_failure_after = -1;
+}
+
+TEST_F(FileXTest, SeekRejectsOffsetsThatCannotBeRepresentedWithoutOverflow)
+{
+    const int file{ _open("/seek-overflow.bin", O_CREAT | O_RDWR | O_TRUNC, 0666) };
+    ASSERT_GE(file, 3);
+    ASSERT_EQ(_lseek(file, std::numeric_limits<off_t>::max(), SEEK_SET),
+              std::numeric_limits<off_t>::max());
+
+    errno = 0;
+    EXPECT_EQ(_lseek(file, 1, SEEK_CUR), static_cast<off_t>(-1));
+    EXPECT_EQ(errno, EOVERFLOW);
+    EXPECT_EQ(_close(file), 0);
+}
+
+TEST_F(FileXTest, RenameReplacesDestinationAndPreservesOpenSourceDescriptor)
+{
+    int destination{ _open("/rename-destination.bin", O_CREAT | O_WRONLY | O_TRUNC, 0666) };
+    ASSERT_GE(destination, 3);
+    ASSERT_EQ(_write(destination, "old", 3), 3);
+    ASSERT_EQ(_close(destination), 0);
+
+    const int source{ _open("/rename-source.bin", O_CREAT | O_RDWR | O_TRUNC, 0666) };
+    ASSERT_GE(source, 3);
+    constexpr char payload[]{ "replacement" };
+    ASSERT_EQ(_write(source, payload, sizeof(payload)), static_cast<int>(sizeof(payload)));
+    ASSERT_EQ(_rename("/rename-source.bin", "/rename-destination.bin"), 0);
+
+    struct stat metadata{};
+    EXPECT_EQ(_fstat(source, &metadata), 0);
+    EXPECT_EQ(metadata.st_size, static_cast<off_t>(sizeof(payload)));
+    ASSERT_EQ(_lseek(source, 0, SEEK_SET), 0);
+    std::array<char, sizeof(payload)> result{};
+    errno = 0;
+    const int read_result{ _read(source, result.data(), result.size()) };
+    EXPECT_EQ(read_result, static_cast<int>(result.size())) << std::strerror(errno);
+    EXPECT_EQ(result, std::to_array(payload));
+    EXPECT_EQ(_close(source), 0);
+
+    errno = 0;
+    EXPECT_EQ(_stat("/rename-source.bin", &metadata), -1);
+    EXPECT_EQ(errno, ENOENT);
+    EXPECT_EQ(_stat("/rename-destination.bin", &metadata), 0);
+}
+
+TEST_F(FileXTest, RenameMigratesCurrentDirectoryAndRelativePaths)
+{
+    ASSERT_EQ(_mkdir("/original-cwd", 0777), 0);
+    ASSERT_EQ(_mkdir("/original-cwd/child", 0777), 0);
+    ASSERT_EQ(runtime::filex::setCurrentPath("/original-cwd/child"), 0);
+    ASSERT_EQ(_rename("/original-cwd", "/renamed-cwd"), 0);
+
+    char current[runtime::filex::MAXIMUM_PATH]{};
+    EXPECT_EQ(runtime::filex::currentPath(current), 0);
+    EXPECT_STREQ(current, "/renamed-cwd/child");
+
+    const int file{ _open("relative.bin", O_CREAT | O_WRONLY | O_TRUNC, 0666) };
+    ASSERT_GE(file, 3);
+    EXPECT_EQ(_close(file), 0);
+    struct stat metadata{};
+    EXPECT_EQ(_stat("/renamed-cwd/child/relative.bin", &metadata), 0);
 }
 
 TEST_F(FileXTest, AppendAndTruncateAreDeterministic)

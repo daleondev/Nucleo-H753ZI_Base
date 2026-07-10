@@ -1,5 +1,6 @@
 #include "runtime/filex/filesystem.hpp"
 
+#include "hal/drivers/factory/rng.hpp"
 #include "hal/drivers/factory/rtc.hpp"
 #include "hal/hal.hpp"
 
@@ -18,6 +19,7 @@
 #include <fcntl.h>
 #include <limits>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/times.h>
 #include <unistd.h>
 #include <utility>
@@ -26,7 +28,6 @@
 #if defined(HAL_PLATFORM_STM32)
 #include <dirent.h>
 #include <reent.h>
-#include <rng.h>
 #include <sys/statvfs.h>
 #endif
 
@@ -231,6 +232,45 @@ namespace
             output[output_length] = '\0';
         }
         return 0;
+    }
+
+    [[nodiscard]] auto path_has_prefix(const char* path,
+                                       const char* prefix,
+                                       bool include_descendants) noexcept -> bool
+    {
+        const std::size_t prefix_length{ std::strlen(prefix) };
+        return std::strncmp(path, prefix, prefix_length) == 0 &&
+               (path[prefix_length] == '\0' || (include_descendants && path[prefix_length] == '/'));
+    }
+
+    [[nodiscard]] auto migrated_path_length(const char* path,
+                                            const char* old_prefix,
+                                            const char* new_prefix,
+                                            bool include_descendants) noexcept -> std::size_t
+    {
+        if (!path_has_prefix(path, old_prefix, include_descendants)) {
+            return std::strlen(path);
+        }
+        return std::strlen(new_prefix) + std::strlen(path + std::strlen(old_prefix));
+    }
+
+    template<std::size_t Size>
+    auto migrate_path(std::array<char, Size>& path,
+                      const char* old_prefix,
+                      const char* new_prefix,
+                      bool include_descendants) noexcept -> void
+    {
+        if (!path_has_prefix(path.data(), old_prefix, include_descendants)) {
+            return;
+        }
+        std::array<char, Size> migrated{};
+        const std::size_t old_length{ std::strlen(old_prefix) };
+        const std::size_t new_length{ std::strlen(new_prefix) };
+        const char* const suffix{ path.data() + old_length };
+        const std::size_t suffix_length{ std::strlen(suffix) };
+        std::memcpy(migrated.data(), new_prefix, new_length);
+        std::memcpy(migrated.data() + new_length, suffix, suffix_length + 1U);
+        path = migrated;
     }
 
     [[nodiscard]] auto information_unlocked(const char* path, EntryInformation& result) noexcept -> int
@@ -571,18 +611,29 @@ extern "C" int _close(int file)
 
 extern "C" int _read(int file, char* buffer, int length)
 {
+    if (length < 0 || (buffer == nullptr && length != 0)) {
+        errno = EINVAL;
+        return -1;
+    }
     if (file == STDIN_FILENO) {
+        if (length == 0) {
+            return 0;
+        }
         if (__io_getchar == nullptr) {
             errno = ENOSYS;
             return -1;
         }
         for (int index{}; index < length; ++index) {
-            buffer[index] = static_cast<char>(__io_getchar());
+            const int character{ __io_getchar() };
+            if (character < 0) {
+                errno = EIO;
+                return index == 0 ? -1 : index;
+            }
+            buffer[index] = static_cast<char>(character);
         }
         return length;
     }
-    if (!usable() || buffer == nullptr || length < 0) {
-        errno = buffer == nullptr || length < 0 ? EINVAL : errno;
+    if (!usable()) {
         return -1;
     }
     const RegistryGuard guard;
@@ -608,18 +659,27 @@ extern "C" int _read(int file, char* buffer, int length)
 
 extern "C" int _write(int file, const char* buffer, int length)
 {
+    if (length < 0 || (buffer == nullptr && length != 0)) {
+        errno = EINVAL;
+        return -1;
+    }
     if (file == STDOUT_FILENO || file == STDERR_FILENO) {
+        if (length == 0) {
+            return 0;
+        }
         if (__io_putchar == nullptr) {
             errno = ENOSYS;
             return -1;
         }
         for (int index{}; index < length; ++index) {
-            static_cast<void>(__io_putchar(buffer[index]));
+            if (__io_putchar(static_cast<unsigned char>(buffer[index])) < 0) {
+                errno = EIO;
+                return index == 0 ? -1 : index;
+            }
         }
         return length;
     }
-    if (!usable() || buffer == nullptr || length < 0) {
-        errno = buffer == nullptr || length < 0 ? EINVAL : errno;
+    if (!usable()) {
         return -1;
     }
     const RegistryGuard guard;
@@ -657,31 +717,59 @@ extern "C" off_t _lseek(int file, off_t offset, int origin)
     if (descriptor == nullptr) {
         return static_cast<off_t>(-1);
     }
-    std::int64_t base{};
+    if (descriptor->open_mode < 0) {
+        const int reopen_error{ switch_mode(
+          *descriptor, descriptor->readable ? FX_OPEN_FOR_READ : FX_OPEN_FOR_WRITE) };
+        if (reopen_error != 0) {
+            errno = reopen_error;
+            return static_cast<off_t>(-1);
+        }
+    }
+    std::uint64_t base{};
     switch (origin) {
         case SEEK_SET:
             break;
         case SEEK_CUR:
-            base = static_cast<std::int64_t>(descriptor->position);
+            base = descriptor->position;
             break;
         case SEEK_END:
-            base = static_cast<std::int64_t>(descriptor->file.fx_file_current_file_size);
+            base = descriptor->file.fx_file_current_file_size;
             break;
         default:
             errno = EINVAL;
             return static_cast<off_t>(-1);
     }
-    const std::int64_t target{ base + offset };
-    if (target < 0 || std::cmp_greater(target, std::numeric_limits<off_t>::max())) {
-        errno = EINVAL;
+    constexpr std::uint64_t maximum_offset{ static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) };
+    if (base > maximum_offset) {
+        errno = EOVERFLOW;
         return static_cast<off_t>(-1);
     }
+
+    std::uint64_t target{};
+    if (offset >= 0) {
+        const auto positive_offset{ static_cast<std::uint64_t>(offset) };
+        if (positive_offset > maximum_offset - base) {
+            errno = EOVERFLOW;
+            return static_cast<off_t>(-1);
+        }
+        target = base + positive_offset;
+    }
+    else {
+        const auto offset_value{ static_cast<std::int64_t>(offset) };
+        const std::uint64_t magnitude{ static_cast<std::uint64_t>(-(offset_value + 1)) + 1U };
+        if (magnitude > base) {
+            errno = EINVAL;
+            return static_cast<off_t>(-1);
+        }
+        target = base - magnitude;
+    }
+
     const UINT status{ fx_file_extended_seek(&descriptor->file, static_cast<ULONG64>(target)) };
     if (status != FX_SUCCESS) {
         errno = filex_errno(status);
         return static_cast<off_t>(-1);
     }
-    descriptor->position = static_cast<std::uint64_t>(target);
+    descriptor->position = target;
     return static_cast<off_t>(target);
 }
 
@@ -707,7 +795,9 @@ extern "C" int _fstat(int file, struct stat* value)
         errno = error;
         return -1;
     }
-    info.size = descriptor->file.fx_file_current_file_size;
+    if (descriptor->open_mode >= 0) {
+        info.size = descriptor->file.fx_file_current_file_size;
+    }
     fill_stat(descriptor->path.data(), info, value);
     return 0;
 }
@@ -732,7 +822,8 @@ extern "C" int _stat(const char* path, struct stat* value)
         return -1;
     }
     for (const auto& descriptor : descriptors) {
-        if (descriptor.allocated && std::strcmp(descriptor.path.data(), normalized) == 0) {
+        if (descriptor.allocated && descriptor.open_mode >= 0 &&
+            std::strcmp(descriptor.path.data(), normalized) == 0) {
             info.size = std::max<std::uint64_t>(info.size, descriptor.file.fx_file_current_file_size);
         }
     }
@@ -783,11 +874,104 @@ extern "C" int _rename(const char* old_path, const char* new_path)
     if (error == 0) {
         error = information_unlocked(old_name, info);
     }
+    if (error == 0 && (std::strcmp(old_name, "/") == 0 || std::strcmp(new_name, "/") == 0)) {
+        error = EBUSY;
+    }
     if (error == 0) {
-        const UINT status{ (info.attributes & FX_DIRECTORY) != 0U
-                             ? fx_directory_rename(&media, old_name, new_name)
-                             : fx_file_rename(&media, old_name, new_name) };
-        error = filex_errno(status);
+        const bool source_is_directory{ (info.attributes & FX_DIRECTORY) != 0U };
+        const bool include_descendants{ source_is_directory };
+
+        for (const auto& descriptor : descriptors) {
+            if (descriptor.allocated &&
+                migrated_path_length(descriptor.path.data(), old_name, new_name, include_descendants) >=
+                  MAXIMUM_PATH) {
+                error = ENAMETOOLONG;
+                break;
+            }
+        }
+        if (error == 0 && source_is_directory &&
+            migrated_path_length(current_directory.data(), old_name, new_name, true) >= MAXIMUM_PATH) {
+            error = ENAMETOOLONG;
+        }
+#if defined(HAL_PLATFORM_STM32)
+        if (error == 0 && source_is_directory) {
+            for (const auto& directory : directories) {
+                if (directory.allocated &&
+                    migrated_path_length(directory.path.data(), old_name, new_name, true) >= MAXIMUM_PATH) {
+                    error = ENAMETOOLONG;
+                    break;
+                }
+            }
+        }
+#endif
+
+        bool destination_exists{};
+        bool destination_is_directory{};
+        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+            EntryInformation destination_info{};
+            const int destination_error{ information_unlocked(new_name, destination_info) };
+            if (destination_error == 0) {
+                destination_exists = true;
+                destination_is_directory = (destination_info.attributes & FX_DIRECTORY) != 0U;
+                if (source_is_directory != destination_is_directory) {
+                    error = source_is_directory ? ENOTDIR : EISDIR;
+                }
+                else if (source_is_directory && path_has_prefix(current_directory.data(), new_name, true)) {
+                    // FileX has no anonymous directory handle with which to keep
+                    // a replaced current working directory alive.
+                    error = EBUSY;
+                }
+            }
+            else if (destination_error != ENOENT) {
+                error = destination_error;
+            }
+        }
+
+        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+            /* Close matching FileX handles before moving their directory
+             * entries. The adapter retains allocation, permissions, append
+             * state, and logical position, then lazily reopens the migrated
+             * path on its next operation. */
+            for (auto& descriptor : descriptors) {
+                if (descriptor.allocated && descriptor.open_mode >= 0 &&
+                    path_has_prefix(descriptor.path.data(), old_name, include_descendants)) {
+                    const UINT close_status{ fx_file_close(&descriptor.file) };
+                    descriptor.open_mode = -1;
+                    if (close_status != FX_SUCCESS) {
+                        error = filex_errno(close_status);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (error == 0 && destination_exists) {
+            error = filex_errno(destination_is_directory ? fx_directory_delete(&media, new_name)
+                                                         : fx_file_delete(&media, new_name));
+        }
+
+        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+            const UINT status{ source_is_directory ? fx_directory_rename(&media, old_name, new_name)
+                                                   : fx_file_rename(&media, old_name, new_name) };
+            error = filex_errno(status);
+        }
+        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+            for (auto& descriptor : descriptors) {
+                if (descriptor.allocated) {
+                    migrate_path(descriptor.path, old_name, new_name, include_descendants);
+                }
+            }
+            if (source_is_directory) {
+                migrate_path(current_directory, old_name, new_name, true);
+#if defined(HAL_PLATFORM_STM32)
+                for (auto& directory : directories) {
+                    if (directory.allocated) {
+                        migrate_path(directory.path, old_name, new_name, true);
+                    }
+                }
+#endif
+            }
+        }
     }
     if (error != 0) {
         errno = error;
@@ -942,6 +1126,28 @@ extern "C" int _truncate(const char* path, off_t length)
     return result;
 }
 
+extern "C" int _gettimeofday(struct timeval* value, void*)
+{
+    if (value == nullptr) {
+        errno = EFAULT;
+        return -1;
+    }
+    const auto rtc{ hal::rtc::create() };
+    if (!rtc) {
+        errno = ENODEV;
+        return -1;
+    }
+    const auto timestamp{ rtc->getTime() };
+    if (!timestamp || timestamp->nanoseconds >= hal::IRtc::NANOSECONDS_PER_SECOND ||
+        !std::in_range<decltype(value->tv_sec)>(timestamp->seconds_since_epoch)) {
+        errno = timestamp ? EOVERFLOW : EIO;
+        return -1;
+    }
+    value->tv_sec = static_cast<decltype(value->tv_sec)>(timestamp->seconds_since_epoch);
+    value->tv_usec = static_cast<decltype(value->tv_usec)>(timestamp->nanoseconds / 1'000U);
+    return 0;
+}
+
 #if defined(HAL_PLATFORM_STM32)
 namespace
 {
@@ -1009,6 +1215,11 @@ extern "C" int _unlink_r(_reent* context, const char* path)
 extern "C" int _rename_r(_reent* context, const char* old_path, const char* new_path)
 {
     return copy_errno_to_reent(context, _rename(old_path, new_path));
+}
+
+extern "C" int _gettimeofday_r(_reent* context, struct timeval* value, void* timezone)
+{
+    return copy_errno_to_reent(context, _gettimeofday(value, timezone));
 }
 
 extern "C" int mkdir(const char* path, mode_t mode) { return _mkdir(path, mode); }
@@ -1124,20 +1335,36 @@ extern "C" clock_t _times(struct tms*)
 }
 extern "C" int _getentropy(void* buffer, std::size_t length)
 {
-    if (buffer == nullptr || length > 256U || hrng.Instance == nullptr) {
-        errno = buffer == nullptr ? EFAULT : EIO;
+    if (length == 0U) {
+        return 0;
+    }
+    if (buffer == nullptr) {
+        errno = EFAULT;
+        return -1;
+    }
+    if (length > 256U) {
+        errno = EIO;
+        return -1;
+    }
+    if (__get_IPSR() != 0U || tx_thread_identify() == TX_NULL) {
+        errno = EPERM;
+        return -1;
+    }
+    const auto rng{ hal::rng::create() };
+    if (!rng) {
+        errno = ENODEV;
         return -1;
     }
     auto* output{ static_cast<std::uint8_t*>(buffer) };
     std::size_t generated{};
     while (generated < length) {
-        std::uint32_t value{};
-        if (HAL_RNG_GenerateRandomNumber(&hrng, &value) != HAL_OK) {
+        const auto random_value{ rng->generate() };
+        if (!random_value) {
             errno = EIO;
             return -1;
         }
-        for (std::size_t index{}; index < sizeof(value) && generated < length; ++index) {
-            output[generated++] = static_cast<std::uint8_t>(value >> (index * CHAR_BIT));
+        for (std::size_t index{}; index < sizeof(*random_value) && generated < length; ++index) {
+            output[generated++] = static_cast<std::uint8_t>(*random_value >> (index * CHAR_BIT));
         }
     }
     return 0;

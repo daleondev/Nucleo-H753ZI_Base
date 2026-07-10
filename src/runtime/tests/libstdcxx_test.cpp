@@ -3,6 +3,10 @@
 
 #include "runtime/libstdcxx/backend.hpp"
 
+#if defined(HAL_PLATFORM_LINUX)
+#include "tx_thread_stack_info.hpp"
+#endif
+
 #include <array>
 #include <atomic>
 #include <barrier>
@@ -64,6 +68,57 @@ namespace
     };
 
     thread_local ThreadLocalState thread_local_state;
+
+#if defined(HAL_PLATFORM_STM32)
+    constexpr int STARTUP_TLS_INITIAL_VALUE{ 0x1357 };
+    constexpr int STARTUP_TLS_UPDATED_VALUE{ 0x2468 };
+
+    class alignas(16) StartupThreadLocalState
+    {
+      public:
+        StartupThreadLocalState()
+          : self{ this }, value{ STARTUP_TLS_INITIAL_VALUE }
+        {
+        }
+
+        ~StartupThreadLocalState() { self = nullptr; }
+
+        StartupThreadLocalState* self;
+        int value;
+    };
+
+    thread_local StartupThreadLocalState startup_thread_local_state;
+    StartupThreadLocalState* startup_thread_local_address{};
+
+    class StartupThreadLocalAccess
+    {
+      public:
+        StartupThreadLocalAccess() { startup_thread_local_address = &startup_thread_local_state; }
+    };
+
+    StartupThreadLocalAccess startup_thread_local_access;
+
+    struct ThreadExitTlsProbe
+    {
+        ~ThreadExitTlsProbe()
+        {
+            if (mutex != nullptr) {
+                const bool acquired{ mutex->try_lock() };
+                unexpectedly_unlocked->store(acquired, std::memory_order_release);
+                if (acquired) {
+                    mutex->unlock();
+                }
+                checked->store(true, std::memory_order_release);
+            }
+        }
+
+        std::mutex* mutex{};
+        std::atomic_bool* checked{};
+        std::atomic_bool* unexpectedly_unlocked{};
+    };
+
+    thread_local ThreadExitTlsProbe thread_exit_tls_probe;
+#endif
 
     class ThreadsafeStatic
     {
@@ -153,6 +208,45 @@ TEST(RuntimeLibstdcxx, MutexesAndConditionVariables)
     shared_timed_thread.join();
     shared_timed_mutex.unlock();
     EXPECT_TRUE(shared_timed_out);
+}
+
+TEST(RuntimeLibstdcxx, ConcurrentFirstUsePublishesOneNativeObject)
+{
+    std::mutex mutex;
+    std::counting_semaphore<2> start{ 0 };
+    std::atomic_int protected_count{};
+
+    auto worker = [&] {
+        start.acquire();
+        for (int iteration{}; iteration < 64; ++iteration) {
+            std::lock_guard lock{ mutex };
+            protected_count.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::yield();
+        }
+    };
+
+    std::thread first{ worker };
+    std::thread second{ worker };
+    start.release(2);
+    first.join();
+    second.join();
+
+    EXPECT_EQ(protected_count.load(std::memory_order_relaxed), 128);
+
+    std::binary_semaphore semaphore{ 0 };
+    std::latch semaphore_start{ 2 };
+    std::thread acquirer{ [&] {
+        semaphore_start.count_down();
+        semaphore_start.wait();
+        semaphore.acquire();
+    } };
+    std::thread releaser{ [&] {
+        semaphore_start.count_down();
+        semaphore_start.wait();
+        semaphore.release();
+    } };
+    acquirer.join();
+    releaser.join();
 }
 
 TEST(RuntimeLibstdcxx, RandomDeviceUsesHardwareEntropyProvider)
@@ -447,7 +541,69 @@ TEST(RuntimeLibstdcxx, ThreadExitAndCallOnce)
         std::call_once(reusable_once, [&] { ++completed; });
     }
     EXPECT_EQ(completed, reusable_once_flag_count);
+
+    std::once_flag outer_once;
+    std::once_flag inner_once;
+    int nested_count{};
+    std::call_once(outer_once, [&] {
+        std::call_once(inner_once, [&] { ++nested_count; });
+        ++nested_count;
+    });
+    std::call_once(inner_once, [&] { ++nested_count; });
+    EXPECT_EQ(nested_count, 2);
 }
+
+#if defined(HAL_PLATFORM_STM32)
+TEST(RuntimeLibstdcxx, StartupThreadLocalObjectKeepsItsIdentity)
+{
+    ASSERT_NE(startup_thread_local_address, nullptr);
+    EXPECT_EQ(&startup_thread_local_state, startup_thread_local_address);
+    EXPECT_EQ(startup_thread_local_state.self, startup_thread_local_address);
+    EXPECT_EQ(startup_thread_local_state.value, STARTUP_TLS_INITIAL_VALUE);
+
+    startup_thread_local_state.value = STARTUP_TLS_UPDATED_VALUE;
+    EXPECT_EQ(startup_thread_local_address->value, STARTUP_TLS_UPDATED_VALUE);
+}
+
+TEST(RuntimeLibstdcxx, AtThreadExitKeepsMutexLockedThroughTlsDestruction)
+{
+    std::mutex mutex;
+    std::condition_variable condition;
+    std::atomic_bool destructor_checked{};
+    std::atomic_bool mutex_was_unexpectedly_unlocked{};
+    bool exiting{};
+
+    std::thread worker{ [&] {
+        std::unique_lock lock{ mutex };
+        thread_exit_tls_probe.mutex = &mutex;
+        thread_exit_tls_probe.checked = &destructor_checked;
+        thread_exit_tls_probe.unexpectedly_unlocked = &mutex_was_unexpectedly_unlocked;
+        exiting = true;
+        std::notify_all_at_thread_exit(condition, std::move(lock));
+    } };
+
+    {
+        std::unique_lock lock{ mutex };
+        condition.wait(lock, [&] { return exiting; });
+    }
+    worker.join();
+
+    EXPECT_TRUE(destructor_checked.load(std::memory_order_acquire));
+    EXPECT_FALSE(mutex_was_unexpectedly_unlocked.load(std::memory_order_acquire));
+}
+#endif
+
+#if defined(HAL_PLATFORM_LINUX)
+TEST(RuntimeLibstdcxx, JoinedThreadsReleaseLinuxHostStackMetadata)
+{
+    const std::size_t baseline{ _tx_linux_thread_stack_live_count() };
+    for (std::size_t iteration{}; iteration < 64U; ++iteration) {
+        std::thread worker{ [] {} };
+        worker.join();
+        EXPECT_EQ(_tx_linux_thread_stack_live_count(), baseline);
+    }
+}
+#endif
 
 TEST(RuntimeLibstdcxx, ContendedStaticInitialization)
 {

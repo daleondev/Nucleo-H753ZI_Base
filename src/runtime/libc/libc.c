@@ -20,20 +20,18 @@ void runtime_libc_initialize(void)
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
-
-enum
-{
-    DYNAMIC_LOCK_COUNT = 16
-};
 
 /* Newlib deliberately keeps this type opaque, allowing the target to store
  * its native lock directly in each static and dynamically allocated object. */
 struct __lock
 {
     TX_MUTEX mutex;
+    struct __lock* next;
     bool created;
     bool allocated;
+    bool dynamic;
 };
 typedef struct __lock __lock_t;
 
@@ -48,7 +46,7 @@ static CHAR tz_mutex_name[] = "Newlib timezone";
 static CHAR dynamic_mutex_name[] = "Newlib dynamic";
 static CHAR dynamic_pool_mutex_name[] = "Newlib lock pool";
 
-static __lock_t dynamic_locks[DYNAMIC_LOCK_COUNT];
+static __lock_t* dynamic_locks;
 static TX_MUTEX dynamic_pool_mutex;
 static bool libc_locks_ready;
 
@@ -174,8 +172,8 @@ void runtime_libc_initialize(void)
         }
     }
 
-    for (size_t index = 0; index < DYNAMIC_LOCK_COUNT; ++index) {
-        if (create_lock(&dynamic_locks[index], dynamic_mutex_name) != 0) {
+    for (__lock_t* lock = dynamic_locks; lock != NULL; lock = lock->next) {
+        if (create_lock(lock, dynamic_mutex_name) != 0) {
             libc_lock_failure();
         }
     }
@@ -209,10 +207,27 @@ void __retarget_lock_init(_LOCK_T* lock)
 
     lock_dynamic_pool();
 
-    for (size_t index = 0; index < DYNAMIC_LOCK_COUNT; ++index) {
-        if (!dynamic_locks[index].allocated) {
-            dynamic_locks[index].allocated = true;
-            *lock = &dynamic_locks[index];
+    for (__lock_t* candidate = dynamic_locks; candidate != NULL; candidate = candidate->next) {
+        if (!candidate->allocated) {
+            candidate->allocated = true;
+            *lock = candidate;
+            unlock_dynamic_pool();
+            return;
+        }
+    }
+
+    __lock_t* const created_lock = (__lock_t*)calloc(1U, sizeof(*created_lock));
+    if (created_lock != NULL) {
+        created_lock->allocated = true;
+        created_lock->dynamic = true;
+        created_lock->next = dynamic_locks;
+        dynamic_locks = created_lock;
+
+        /* Before tx_kernel_enter() there is no scheduler and lock acquisition
+         * is a no-op. runtime_libc_initialize() creates every such deferred
+         * mutex before the first ThreadX thread can run. */
+        if (!libc_locks_ready || create_lock(created_lock, dynamic_mutex_name) == 0) {
+            *lock = created_lock;
             unlock_dynamic_pool();
             return;
         }
@@ -231,9 +246,9 @@ void __retarget_lock_close(_LOCK_T lock)
     }
 
     lock_dynamic_pool();
-    for (size_t index = 0; index < DYNAMIC_LOCK_COUNT; ++index) {
-        if (lock == &dynamic_locks[index]) {
-            dynamic_locks[index].allocated = false;
+    for (__lock_t* candidate = dynamic_locks; candidate != NULL; candidate = candidate->next) {
+        if (lock == candidate && candidate->dynamic) {
+            candidate->allocated = false;
             unlock_dynamic_pool();
             return;
         }

@@ -44,11 +44,6 @@ namespace
         std::abort();
     }
 
-    [[nodiscard]] auto thread_pointer(TX_THREAD* thread) noexcept -> std::byte*
-    {
-        return static_cast<std::byte*>(thread->tx_thread_runtime_tls_block);
-    }
-
     [[nodiscard]] auto tls_data(std::byte* thread_pointer_value) noexcept -> std::byte*
     {
         return thread_pointer_value + linker_value(__arm32_tls_tcb_offset);
@@ -128,7 +123,17 @@ extern "C" auto runtime_tls_adopt_startup(TX_THREAD* thread) noexcept -> void
         tls_failure();
     }
 
-    std::memcpy(tls_data(thread_pointer(thread)), __tls_base, linker_value(__tls_size));
+    // Global constructors execute in the initial execution context and may
+    // already have initialized non-trivial thread_local objects, published
+    // their addresses, and registered destructors that point into the linker
+    // TLS image. Relocating those live objects with memcpy would violate their
+    // identity and leave the destructor registrations pointing at stale data.
+    // Make the application ThreadX thread continue using the original image.
+    std::free(thread->tx_thread_runtime_tls_allocation);
+    const auto startup_data{ reinterpret_cast<std::uintptr_t>(__tls_base) };
+    thread->tx_thread_runtime_tls_allocation = nullptr;
+    thread->tx_thread_runtime_tls_block =
+      reinterpret_cast<void*>(startup_data - linker_value(__arm32_tls_tcb_offset));
     thread->tx_thread_runtime_tls_destructors = startup_destructors;
     startup_destructors = nullptr;
 }

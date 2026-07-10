@@ -47,6 +47,7 @@ endfunction()
 threadx_linux_generate_patched_source(TX_LINUX_INITIALIZE_LOW_LEVEL_SOURCE "tx_initialize_low_level.c")
 threadx_linux_generate_patched_source(TX_LINUX_THREAD_STACK_BUILD_SOURCE "tx_thread_stack_build.c")
 threadx_linux_generate_patched_source(TX_LINUX_THREAD_SYSTEM_RETURN_SOURCE "tx_thread_system_return.c")
+threadx_linux_generate_patched_source(TX_LINUX_THREAD_SCHEDULE_SOURCE "tx_thread_schedule.c")
 
 target_sources(${PROJECT_NAME}
     PRIVATE
@@ -54,7 +55,7 @@ target_sources(${PROJECT_NAME}
     ${THREADX_LINUX_GNU_DIR}/src/tx_thread_context_restore.c
     ${THREADX_LINUX_GNU_DIR}/src/tx_thread_context_save.c
     ${THREADX_LINUX_GNU_DIR}/src/tx_thread_interrupt_control.c
-    ${THREADX_LINUX_GNU_DIR}/src/tx_thread_schedule.c
+    ${TX_LINUX_THREAD_SCHEDULE_SOURCE}
     ${THREADX_LINUX_GNU_DIR}/src/tx_timer_interrupt.c
     ${TX_LINUX_INITIALIZE_LOW_LEVEL_SOURCE}
     ${TX_LINUX_THREAD_STACK_BUILD_SOURCE}

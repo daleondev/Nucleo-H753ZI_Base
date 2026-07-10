@@ -7,6 +7,7 @@
 #include <csignal>
 #include <cstdlib>
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -16,6 +17,8 @@ namespace tx::linux
 {
     namespace
     {
+        std::atomic_size_t live_stack_info_count{};
+
         using ErrorType = decltype(TX_SUCCESS);
         enum class Error : ErrorType
         {
@@ -94,6 +97,7 @@ namespace tx::linux
             StackInfo(std::unique_ptr<std::byte[], CustomDeleter<free>>&& host_stack_base)
               : host_stack_base(std::move(host_stack_base))
             {
+                live_stack_info_count.fetch_add(1U, std::memory_order_relaxed);
             }
 
             ~StackInfo()
@@ -101,6 +105,7 @@ namespace tx::linux
                 if (signal_stack.ss_sp) {
                     delete[] static_cast<std::byte*>(signal_stack.ss_sp);
                 }
+                live_stack_info_count.fetch_sub(1U, std::memory_order_relaxed);
             }
 
             static StackInfo* of(TX_THREAD* thread)
@@ -315,4 +320,17 @@ VOID _tx_linux_thread_stack_refresh(TX_THREAD* thread_ptr)
     if (pthread_equal(thread_ptr->tx_thread_linux_thread_id, pthread_self())) {
         _tx_linux_thread_stack_capture_current(thread_ptr);
     }
+}
+
+VOID _tx_linux_thread_stack_release(TX_THREAD* thread_ptr)
+{
+    if (auto* stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info != nullptr) {
+        thread_ptr->tx_thread_extension_ptr = nullptr;
+        delete stack_info;
+    }
+}
+
+size_t _tx_linux_thread_stack_live_count(VOID)
+{
+    return tx::linux::live_stack_info_count.load(std::memory_order_relaxed);
 }

@@ -7,7 +7,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <sys/time.h>
 #include <thread>
+
+extern "C" int _gettimeofday(struct timeval* value, void* timezone);
 
 namespace
 {
@@ -97,4 +101,22 @@ TEST(RuntimeLibc, ConcurrentAllocationAndStdio)
     EXPECT_EQ(std::fflush(stream), 0);
     EXPECT_GT(std::ftell(stream), 0L);
     EXPECT_EQ(std::fclose(stream), 0);
+}
+
+TEST(RuntimeLibc, RetargetedGettimeofdayUsesRealtimeClock)
+{
+    errno = 0;
+    EXPECT_EQ(_gettimeofday(nullptr, nullptr), -1);
+    EXPECT_EQ(errno, EFAULT);
+
+    const std::time_t before{ std::time(nullptr) };
+    timeval value{};
+    ASSERT_EQ(_gettimeofday(&value, nullptr), 0);
+    const std::time_t after{ std::time(nullptr) };
+    ASSERT_NE(before, static_cast<std::time_t>(-1));
+    ASSERT_NE(after, static_cast<std::time_t>(-1));
+    EXPECT_GE(value.tv_sec, before);
+    EXPECT_LE(value.tv_sec, after);
+    EXPECT_GE(value.tv_usec, 0);
+    EXPECT_LT(value.tv_usec, 1'000'000);
 }

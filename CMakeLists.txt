@@ -13,6 +13,11 @@ target_compile_options(project_compiler_settings
 )
 
 option(ENABLE_CLANG_TIDY "Run clang-tidy while compiling project-owned C++ targets" OFF)
+option(RUNTIME_HARDWARE_SELF_TEST "Build the board-resident runtime conformance image" OFF)
+
+if(RUNTIME_HARDWARE_SELF_TEST AND NOT CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    message(FATAL_ERROR "RUNTIME_HARDWARE_SELF_TEST is only supported by the STM32 target")
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include(CTest)

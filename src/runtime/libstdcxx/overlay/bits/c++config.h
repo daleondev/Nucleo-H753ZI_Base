@@ -13,6 +13,11 @@
 #define _GLIBCXX_USE_GETCWD 1
 #define _GLIBCXX_USE_CHDIR 1
 #define _GLIBCXX_HAVE_SYS_STATVFS_H 1
+
+/* The project supplies an Arm TLS ABI implementation in tls.cpp. Enable
+ * libstdc++'s thread-local call_once trampoline instead of its global-functor
+ * fallback, which has known reentrancy limitations. */
+#define _GLIBCXX_HAVE_TLS 1
 #endif
 
 /* The Linux libstdc++ configuration enables pthread and futex fast paths

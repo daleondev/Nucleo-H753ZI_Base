@@ -115,6 +115,9 @@ namespace runtime
 
             static_assert(offsetof(ThreadControl, thread) == 0U);
             static_assert(RUNTIME_STD_THREAD_PRIORITY < 32U);
+            static_assert(std::atomic_ref<void*>::required_alignment <= alignof(MutexHandle));
+            static_assert(std::atomic_ref<void*>::required_alignment <= alignof(ConditionHandle));
+            static_assert(std::atomic_ref<void*>::required_alignment <= alignof(SemaphoreHandle));
 
             TX_MUTEX initialization_mutex;
             TX_QUEUE cleanup_queue;
@@ -329,29 +332,45 @@ namespace runtime
                 }
             }
 
+            template<typename Implementation, typename Handle>
+            [[nodiscard]] Implementation* load_implementation(Handle* handle) noexcept
+            {
+                return static_cast<Implementation*>(
+                  std::atomic_ref<void*>{ handle->implementation }.load(std::memory_order_acquire));
+            }
+
+            template<typename Handle>
+            void store_implementation(Handle* handle, void* implementation) noexcept
+            {
+                std::atomic_ref<void*>{ handle->implementation }.store(implementation,
+                                                                       std::memory_order_release);
+            }
+
             template<typename Handle>
             [[nodiscard]] MutexImplementation* ensure_mutex(Handle* handle) noexcept
             {
                 if (handle == nullptr || require_thread_context() != 0) {
                     return nullptr;
                 }
-                if (handle->implementation != nullptr) {
-                    return static_cast<MutexImplementation*>(handle->implementation);
+                if (auto* implementation{ load_implementation<MutexImplementation>(handle) };
+                    implementation != nullptr) {
+                    return implementation;
                 }
 
                 raw_mutex_get(&initialization_mutex);
-                if (handle->implementation == nullptr) {
-                    auto* implementation{ new (std::nothrow) MutexImplementation{} };
-                    if (implementation != nullptr) {
-                        if (tx_mutex_create(&implementation->mutex, mutex_name, TX_INHERIT) == TX_SUCCESS) {
-                            handle->implementation = implementation;
+                auto* result{ load_implementation<MutexImplementation>(handle) };
+                if (result == nullptr) {
+                    auto* candidate{ new (std::nothrow) MutexImplementation{} };
+                    if (candidate != nullptr) {
+                        if (tx_mutex_create(&candidate->mutex, mutex_name, TX_INHERIT) == TX_SUCCESS) {
+                            store_implementation(handle, candidate);
+                            result = candidate;
                         }
                         else {
-                            delete implementation;
+                            delete candidate;
                         }
                     }
                 }
-                auto* result{ static_cast<MutexImplementation*>(handle->implementation) };
                 raw_mutex_put(&initialization_mutex);
                 return result;
             }
@@ -362,7 +381,7 @@ namespace runtime
                 if (handle == nullptr) {
                     return EINVAL;
                 }
-                auto* implementation{ static_cast<MutexImplementation*>(handle->implementation) };
+                auto* implementation{ load_implementation<MutexImplementation>(handle) };
                 if (implementation == nullptr) {
                     return 0;
                 }
@@ -370,7 +389,7 @@ namespace runtime
                 if (status != TX_SUCCESS) {
                     return status == TX_DELETE_ERROR ? EBUSY : EINVAL;
                 }
-                handle->implementation = nullptr;
+                store_implementation(handle, nullptr);
                 delete implementation;
                 return 0;
             }
@@ -411,10 +430,13 @@ namespace runtime
                 if (context_status != 0) {
                     return context_status;
                 }
-                if (handle == nullptr || handle->implementation == nullptr) {
+                if (handle == nullptr) {
                     return EPERM;
                 }
-                auto* implementation{ static_cast<MutexImplementation*>(handle->implementation) };
+                auto* implementation{ load_implementation<MutexImplementation>(handle) };
+                if (implementation == nullptr) {
+                    return EPERM;
+                }
                 return tx_mutex_put(&implementation->mutex) == TX_SUCCESS ? 0 : EPERM;
             }
 
@@ -476,24 +498,26 @@ namespace runtime
                 if (handle == nullptr || require_thread_context() != 0) {
                     return nullptr;
                 }
-                if (handle->implementation != nullptr) {
-                    return static_cast<ConditionImplementation*>(handle->implementation);
+                if (auto* implementation{ load_implementation<ConditionImplementation>(handle) };
+                    implementation != nullptr) {
+                    return implementation;
                 }
 
                 raw_mutex_get(&initialization_mutex);
-                if (handle->implementation == nullptr) {
-                    auto* implementation{ new (std::nothrow) ConditionImplementation{} };
-                    if (implementation != nullptr) {
-                        if (tx_mutex_create(&implementation->mutex, condition_mutex_name, TX_INHERIT) ==
+                auto* result{ load_implementation<ConditionImplementation>(handle) };
+                if (result == nullptr) {
+                    auto* candidate{ new (std::nothrow) ConditionImplementation{} };
+                    if (candidate != nullptr) {
+                        if (tx_mutex_create(&candidate->mutex, condition_mutex_name, TX_INHERIT) ==
                             TX_SUCCESS) {
-                            handle->implementation = implementation;
+                            store_implementation(handle, candidate);
+                            result = candidate;
                         }
                         else {
-                            delete implementation;
+                            delete candidate;
                         }
                     }
                 }
-                auto* result{ static_cast<ConditionImplementation*>(handle->implementation) };
                 raw_mutex_put(&initialization_mutex);
                 return result;
             }
@@ -537,25 +561,27 @@ namespace runtime
                 if (handle == nullptr || require_thread_context() != 0) {
                     return nullptr;
                 }
-                if (handle->implementation != nullptr) {
-                    return static_cast<SemaphoreImplementation*>(handle->implementation);
+                if (auto* implementation{ load_implementation<SemaphoreImplementation>(handle) };
+                    implementation != nullptr) {
+                    return implementation;
                 }
 
                 raw_mutex_get(&initialization_mutex);
-                if (handle->implementation == nullptr) {
-                    auto* implementation{ new (std::nothrow) SemaphoreImplementation{} };
-                    if (implementation != nullptr) {
-                        if (tx_semaphore_create(&implementation->semaphore,
+                auto* result{ load_implementation<SemaphoreImplementation>(handle) };
+                if (result == nullptr) {
+                    auto* candidate{ new (std::nothrow) SemaphoreImplementation{} };
+                    if (candidate != nullptr) {
+                        if (tx_semaphore_create(&candidate->semaphore,
                                                 semaphore_name,
                                                 static_cast<ULONG>(handle->initial_count)) == TX_SUCCESS) {
-                            handle->implementation = implementation;
+                            store_implementation(handle, candidate);
+                            result = candidate;
                         }
                         else {
-                            delete implementation;
+                            delete candidate;
                         }
                     }
                 }
-                auto* result{ static_cast<SemaphoreImplementation*>(handle->implementation) };
                 raw_mutex_put(&initialization_mutex);
                 return result;
             }
@@ -954,14 +980,14 @@ namespace runtime
         void mutex_init(MutexHandle* mutex) noexcept
         {
             if (mutex != nullptr) {
-                mutex->implementation = nullptr;
+                store_implementation(mutex, nullptr);
             }
         }
 
         void recursive_mutex_init(RecursiveMutexHandle* mutex) noexcept
         {
             if (mutex != nullptr) {
-                mutex->implementation = nullptr;
+                store_implementation(mutex, nullptr);
             }
         }
 
@@ -1015,7 +1041,7 @@ namespace runtime
         void condition_init(ConditionHandle* condition) noexcept
         {
             if (condition != nullptr) {
-                condition->implementation = nullptr;
+                store_implementation(condition, nullptr);
             }
         }
 
@@ -1024,7 +1050,7 @@ namespace runtime
             if (condition == nullptr) {
                 return EINVAL;
             }
-            auto* implementation{ static_cast<ConditionImplementation*>(condition->implementation) };
+            auto* implementation{ load_implementation<ConditionImplementation>(condition) };
             if (implementation == nullptr) {
                 return 0;
             }
@@ -1037,7 +1063,7 @@ namespace runtime
             if (tx_mutex_delete(&implementation->mutex) != TX_SUCCESS) {
                 return EBUSY;
             }
-            condition->implementation = nullptr;
+            store_implementation(condition, nullptr);
             delete implementation;
             return 0;
         }
@@ -1054,7 +1080,7 @@ namespace runtime
                 }
                 auto* condition_implementation{ ensure_condition(condition) };
                 if (condition_implementation == nullptr || mutex == nullptr ||
-                    mutex->implementation == nullptr) {
+                    load_implementation<MutexImplementation>(mutex) == nullptr) {
                     return EINVAL;
                 }
 
@@ -1114,10 +1140,13 @@ namespace runtime
 
         int condition_wait_recursive(ConditionHandle* condition, RecursiveMutexHandle* mutex) noexcept
         {
-            if (mutex == nullptr || mutex->implementation == nullptr) {
+            if (mutex == nullptr) {
                 return EINVAL;
             }
-            const auto* implementation{ static_cast<const MutexImplementation*>(mutex->implementation) };
+            const auto* implementation{ load_implementation<MutexImplementation>(mutex) };
+            if (implementation == nullptr) {
+                return EINVAL;
+            }
             if (implementation->mutex.tx_mutex_owner != tx_thread_identify() ||
                 implementation->mutex.tx_mutex_ownership_count != 1U) {
                 return EINVAL;
@@ -1138,10 +1167,13 @@ namespace runtime
             if (context_status != 0) {
                 return context_status;
             }
-            if (condition == nullptr || condition->implementation == nullptr) {
+            if (condition == nullptr) {
                 return 0;
             }
-            auto* implementation{ static_cast<ConditionImplementation*>(condition->implementation) };
+            auto* implementation{ load_implementation<ConditionImplementation>(condition) };
+            if (implementation == nullptr) {
+                return 0;
+            }
             raw_mutex_get(&implementation->mutex);
             Waiter* const waiter{ implementation->first };
             if (waiter != nullptr) {
@@ -1160,10 +1192,13 @@ namespace runtime
             if (context_status != 0) {
                 return context_status;
             }
-            if (condition == nullptr || condition->implementation == nullptr) {
+            if (condition == nullptr) {
                 return 0;
             }
-            auto* implementation{ static_cast<ConditionImplementation*>(condition->implementation) };
+            auto* implementation{ load_implementation<ConditionImplementation>(condition) };
+            if (implementation == nullptr) {
+                return 0;
+            }
             raw_mutex_get(&implementation->mutex);
             while (implementation->first != nullptr) {
                 Waiter* const waiter{ implementation->first };
@@ -1215,7 +1250,7 @@ namespace runtime
             if (semaphore == nullptr) {
                 return EINVAL;
             }
-            semaphore->implementation = nullptr;
+            store_implementation(semaphore, nullptr);
             semaphore->initial_count = value;
             return 0;
         }
@@ -1225,14 +1260,14 @@ namespace runtime
             if (semaphore == nullptr) {
                 return EINVAL;
             }
-            auto* implementation{ static_cast<SemaphoreImplementation*>(semaphore->implementation) };
+            auto* implementation{ load_implementation<SemaphoreImplementation>(semaphore) };
             if (implementation == nullptr) {
                 return 0;
             }
             if (tx_semaphore_delete(&implementation->semaphore) != TX_SUCCESS) {
                 return EBUSY;
             }
-            semaphore->implementation = nullptr;
+            store_implementation(semaphore, nullptr);
             delete implementation;
             return 0;
         }
@@ -1475,13 +1510,48 @@ namespace runtime
     }
 }
 
-extern "C" void runtime_libstdcxx_thread_notify(TX_THREAD* thread, UINT event)
+namespace
 {
-    if (event == TX_THREAD_EXIT) {
+    void cleanup_thread_runtime(TX_THREAD* thread) noexcept
+    {
+        if (thread == nullptr || thread->tx_thread_runtime_cleanup_started != 0U) {
+            return;
+        }
+
+        // ThreadX releases every mutex still owned by a thread immediately
+        // after its entry function returns. C++ requires thread_local and
+        // notify_all_at_thread_exit callbacks to run first, while an exit
+        // mutex can still be owned by the departing thread.
+        thread->tx_thread_runtime_cleanup_started = 1U;
 #if defined(HAL_PLATFORM_STM32)
         runtime_tls_thread_exit(thread);
 #endif
         runtime::detail::run_thread_specific_destructors(thread);
+    }
+}
+
+extern "C" void runtime_libstdcxx_thread_entry(ULONG)
+{
+    TX_THREAD* const thread{ tx_thread_identify() };
+    if (thread == nullptr || thread->tx_thread_runtime_entry == nullptr) {
+        std::terminate();
+    }
+
+    try {
+        thread->tx_thread_runtime_entry(thread->tx_thread_runtime_entry_parameter);
+    } catch (...) {
+        // Never unwind a C++ exception through ThreadX's C entry frame.
+        std::terminate();
+    }
+    cleanup_thread_runtime(thread);
+}
+
+extern "C" void runtime_libstdcxx_thread_notify(TX_THREAD* thread, UINT event)
+{
+    if (event == TX_THREAD_EXIT) {
+        // Forced termination does not return through the wrapper. Keep the
+        // notification as an idempotent fallback for that path.
+        cleanup_thread_runtime(thread);
     }
 }
 
@@ -1496,10 +1566,16 @@ extern "C" void runtime_libstdcxx_thread_create(TX_THREAD* thread)
     for (unsigned int& generation : thread->tx_thread_runtime_tls_generations) {
         generation = 0U;
     }
+    thread->tx_thread_runtime_entry = thread->tx_thread_entry;
+    thread->tx_thread_runtime_entry_parameter = thread->tx_thread_entry_parameter;
+    thread->tx_thread_runtime_cleanup_started = 0U;
+    thread->tx_thread_entry = runtime_libstdcxx_thread_entry;
+    thread->tx_thread_entry_parameter = 0U;
 }
 
 extern "C" void runtime_libstdcxx_thread_started(TX_THREAD* thread)
 {
+    thread->tx_thread_runtime_cleanup_started = 0U;
     if (tx_thread_entry_exit_notify(thread, runtime_libstdcxx_thread_notify) != TX_SUCCESS) {
         std::terminate();
     }
