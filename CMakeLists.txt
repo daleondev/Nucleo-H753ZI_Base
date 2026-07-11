@@ -74,6 +74,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     )
 endif()
 
+add_subdirectory(src/hal)
+add_subdirectory(runtime)
 add_subdirectory(src)
 
 if(ENABLE_CLANG_TIDY)

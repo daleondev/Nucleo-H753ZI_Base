@@ -1,7 +1,7 @@
 #ifndef RUNTIME_SEMAPHORE_BASE_H
 #define RUNTIME_SEMAPHORE_BASE_H
 
-#include "runtime/libstdcxx/backend.hpp"
+#include "libstdcxx/backend.hpp"
 
 #include <bits/chrono.h>
 

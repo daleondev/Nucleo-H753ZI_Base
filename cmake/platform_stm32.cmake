@@ -1,10 +1,10 @@
 set(THREADX_ARCH cortex_m7)
 set(THREADX_TOOLCHAIN gnu)
-set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/src/runtime/threadx/tx_user.h)
+set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/runtime/threadx/tx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
 target_link_libraries(threadx PRIVATE project_compiler_settings)
 
-set(FX_USER_FILE ${PROJECT_SOURCE_DIR}/src/runtime/filex/fx_user.h)
+set(FX_USER_FILE ${PROJECT_SOURCE_DIR}/runtime/libc/fx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/filex)
 target_link_libraries(filex PRIVATE project_compiler_settings)
 
@@ -88,7 +88,7 @@ target_include_directories(platform
     PUBLIC
         # tx_api.h includes this as "tx_user.h". It must precede CubeMX/Inc,
         # which also contains CubeMX's generated tx_user.h.
-        ${PROJECT_SOURCE_DIR}/src/runtime/threadx
+        ${PROJECT_SOURCE_DIR}/runtime/threadx
         ${PROJECT_SOURCE_DIR}/external/CubeMX/Inc
         ${PROJECT_SOURCE_DIR}/external/stm32h7xx-hal-driver/Inc
         ${PROJECT_SOURCE_DIR}/external/stm32h7xx-hal-driver/Inc/Legacy

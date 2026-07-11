@@ -17,7 +17,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 # GoogleTest is part of the test executable and must see the same libstdc++
-# overlay and gthread ABI as the code under test.
+# replacement headers and gthread ABI as the code under test.
 target_link_libraries(gtest PRIVATE runtime::runtime)
 target_link_libraries(gtest_main PRIVATE runtime::runtime)
 
@@ -25,7 +25,7 @@ add_executable(runtime_tests)
 
 target_sources(runtime_tests
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/filex_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/libc_filex_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libc_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libstdcxx_test.cpp
 )

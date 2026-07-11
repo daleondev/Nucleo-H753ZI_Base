@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <tx_api.h>
 
-#include "runtime/libstdcxx/backend.hpp"
+#include "libstdcxx/backend.hpp"
 
 #if defined(HAL_PLATFORM_LINUX)
 #include "tx_thread_stack_info.hpp"

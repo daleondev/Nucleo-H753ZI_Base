@@ -4,24 +4,28 @@ add_library(runtime::libc ALIAS runtime_libc)
 target_sources(runtime_libc
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/libc.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/filex.cpp
 )
 
 target_link_libraries(runtime_libc
     PRIVATE
         hal
     PUBLIC
-        runtime::filex
+        filex
         threadx
+        project_compiler_settings
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     target_include_directories(runtime_libc
         BEFORE PUBLIC
-            ${PROJECT_SOURCE_DIR}/src/runtime/filex/overlay
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
 endif()
 
 target_include_directories(runtime_libc
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/runtime
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
 )
@@ -37,10 +41,11 @@ target_compile_options(runtime_libc
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
-    # Runtime hook providers have no direct application reference. Force this
-    # archive member into the link so ThreadX and libc can resolve the hooks.
+    # Runtime hook providers and the FileX-backed syscall adapter have no
+    # ordinary application references. Keep both archive members in the link.
     target_link_options(runtime_libc
         INTERFACE
             LINKER:--undefined=runtime_libc_initialize
+            LINKER:--undefined=runtime_filex_initialize
     )
 endif()

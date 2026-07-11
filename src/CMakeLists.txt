@@ -1,7 +1,7 @@
 if(RUNTIME_HARDWARE_SELF_TEST)
     target_sources(${PROJECT_NAME}
         PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/runtime/tests/hardware_self_test.cpp
+            ${PROJECT_SOURCE_DIR}/runtime/tests/hardware_self_test.cpp
     )
     target_compile_definitions(${PROJECT_NAME}
         PRIVATE
@@ -18,9 +18,6 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
-add_subdirectory(hal)
-add_subdirectory(runtime)
 
 if(RUNTIME_HARDWARE_SELF_TEST)
     target_compile_definitions(runtime_libstdcxx

@@ -1,7 +1,7 @@
 #ifndef RUNTIME_GTHR_DEFAULT_H
 #define RUNTIME_GTHR_DEFAULT_H
 
-#include "runtime/libstdcxx/backend.hpp"
+#include "libstdcxx/backend.hpp"
 
 #include <cerrno>
 

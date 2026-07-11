@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
@@ -110,6 +111,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
         indicate_failure();
     }
     debug("[filex] std::fstream/std::filesystem sample passed");
+    std::println("test");
 
     const auto user_button{ hal::board::createButton(hal::board::ButtonId::User) };
     if (user_button == nullptr) {
