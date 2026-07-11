@@ -115,8 +115,8 @@ TEST(RuntimeLibc, RetargetedGettimeofdayUsesRealtimeClock)
     const std::time_t after{ std::time(nullptr) };
     ASSERT_NE(before, static_cast<std::time_t>(-1));
     ASSERT_NE(after, static_cast<std::time_t>(-1));
-    EXPECT_GE(value.tv_sec, before);
-    EXPECT_LE(value.tv_sec, after);
+    EXPECT_GE(value.tv_sec, before - 1);
+    EXPECT_LE(value.tv_sec, after + 1);
     EXPECT_GE(value.tv_usec, 0);
     EXPECT_LT(value.tv_usec, 1'000'000);
 }

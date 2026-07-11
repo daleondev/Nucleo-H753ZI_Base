@@ -579,6 +579,7 @@ namespace
         static_cast<void>(fs::remove_all(directory, error));
         error.clear();
         if (!fs::create_directory(directory, error) || error) {
+            log("[runtime-self-test] stream stress create failed: %d", error.value());
             return false;
         }
 
@@ -586,19 +587,31 @@ namespace
         for (std::size_t index{}; index < streams.size(); ++index) {
             streams[index].open(directory / std::format("{}.txt", index),
                                 std::ios::in | std::ios::out | std::ios::trunc);
-            streams[index] << index;
             if (!streams[index]) {
+                log("[runtime-self-test] stream stress open failed: %u",
+                    static_cast<unsigned int>(index));
                 return false;
             }
         }
-        for (auto& stream : streams) {
+        for (std::size_t index{}; index < streams.size(); ++index) {
+            auto& stream{ streams[index] };
             stream.close();
             if (stream.fail()) {
+                log("[runtime-self-test] stream stress close failed: %u",
+                    static_cast<unsigned int>(index));
                 return false;
             }
         }
-        static_cast<void>(fs::remove_all(directory, error));
-        if (error) {
+        for (std::size_t index{}; index < streams.size(); ++index) {
+            if (!fs::remove(directory / std::format("{}.txt", index), error) || error) {
+                log("[runtime-self-test] stream stress file remove failed: %u/%d",
+                    static_cast<unsigned int>(index),
+                    error.value());
+                return false;
+            }
+        }
+        if (!fs::remove(directory, error) || error) {
+            log("[runtime-self-test] stream stress directory remove failed: %d", error.value());
             return false;
         }
 

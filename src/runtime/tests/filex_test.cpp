@@ -61,6 +61,11 @@ namespace
             static_cast<void>(_rmdir("/self-tree/child"));
             static_cast<void>(_rmdir("/self-tree"));
             static_cast<void>(_rmdir("/working-directory"));
+            for (unsigned int index{}; index < 16U; ++index) {
+                const std::string path{ "/entry-history/" + std::to_string(index) + ".txt" };
+                static_cast<void>(_unlink(path.c_str()));
+            }
+            static_cast<void>(_rmdir("/entry-history"));
             static_cast<void>(_rmdir("/directory"));
             for (unsigned index{}; index < 4U; ++index) {
                 const std::string path{ "/concurrent" + std::to_string(index) };
@@ -284,6 +289,19 @@ TEST_F(FileXTest, RejectsDirectoryMovesBelowItselfAndRemovalOfCurrentDirectory)
     EXPECT_EQ(errno, EBUSY);
     ASSERT_EQ(runtime::filex::setCurrentPath("/"), 0);
     EXPECT_EQ(_rmdir("/working-directory"), 0);
+}
+
+TEST_F(FileXTest, DeletesDirectoryWithManyFormerEntriesOnSmallFatVolume)
+{
+    ASSERT_EQ(_mkdir("/entry-history", 0777), 0);
+    for (unsigned int index{}; index < 16U; ++index) {
+        const std::string path{ "/entry-history/" + std::to_string(index) + ".txt" };
+        const int file{ _open(path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666) };
+        ASSERT_GE(file, 3);
+        ASSERT_EQ(_close(file), 0);
+        ASSERT_EQ(_unlink(path.c_str()), 0);
+    }
+    EXPECT_EQ(_rmdir("/entry-history"), 0);
 }
 
 TEST_F(FileXTest, AppendAndTruncateAreDeterministic)
