@@ -28,14 +28,14 @@ endif()
 
 target_include_directories(runtime_libstdcxx
     BEFORE PUBLIC
-        ${PROJECT_SOURCE_DIR}/runtime
+        ${PROJECT_SOURCE_DIR}/platform/runtime
         $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:${CMAKE_CURRENT_SOURCE_DIR}/vendor/gcc-15.2.0>
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_link_libraries(runtime_libstdcxx
     PRIVATE
-        hal
+        platform::hal
     PUBLIC
         runtime::libc
         threadx

@@ -1,13 +1,14 @@
 # ThreadX C and C++ runtime port
 
-This directory contains project-owned system runtime integration. It is kept
-outside `src` so application code does not share a source tree with toolchain,
-RTOS, or C library adaptation code.
+This directory contains project-owned system runtime integration. It lives
+under `platform/`, alongside the HAL, so application code in `src` does not
+share a source tree with hardware, toolchain, RTOS, or C library adaptation.
 
 ## Ownership
 
-- `threadx/` owns application-thread startup and the project ThreadX
-  configuration.
+- `startup.cpp` and `tx_user.h` own application-thread startup and the project
+  ThreadX configuration. The runtime is ThreadX-specific, so a nested adapter
+  directory would not add a useful abstraction boundary.
 - `libc/` owns Newlib reentrancy and locking, plus the FileX-backed POSIX
   syscall layer. Its `include/` directory contains compatibility headers that
   Newlib does not provide for this target.

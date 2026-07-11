@@ -3,6 +3,7 @@ add_subdirectory(devices)
 add_subdirectory(board)
 
 add_library(hal STATIC)
+add_library(platform::hal ALIAS hal)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     set(HAL_PLATFORM_DIRECTORY stm32)
@@ -36,8 +37,3 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             HAL_PLATFORM_LINUX
     )
 endif()
-
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        hal
-)

@@ -25,7 +25,7 @@ target_compile_options(hal_tests
         -Wpedantic
 )
 
-runtime_attach_threadx_startup(hal_tests)
+runtime_attach(hal_tests)
 
 add_test(NAME hal COMMAND hal_tests --gtest_color=no)
 set_tests_properties(hal PROPERTIES TIMEOUT 30)

@@ -3,7 +3,7 @@ add_library(hal::drivers ALIAS hal_drivers)
 
 target_include_directories(hal_drivers
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/platform
 )
 
 target_link_libraries(hal_drivers

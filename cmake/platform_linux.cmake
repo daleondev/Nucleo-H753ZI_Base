@@ -1,11 +1,11 @@
 set(THREADX_ARCH linux)
 set(THREADX_TOOLCHAIN gnu)
 set(THREADX_CUSTOM_PORT ${CMAKE_SOURCE_DIR}/external/threadx_port/linux/gnu)
-set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/runtime/threadx/tx_user.h)
+set(TX_USER_FILE ${PROJECT_SOURCE_DIR}/platform/runtime/tx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/threadx)
 target_link_libraries(threadx PRIVATE project_compiler_settings)
 
-set(FX_USER_FILE ${PROJECT_SOURCE_DIR}/runtime/libc/fx_user.h)
+set(FX_USER_FILE ${PROJECT_SOURCE_DIR}/platform/runtime/libc/fx_user.h)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/filex)
 target_link_libraries(filex PRIVATE project_compiler_settings)
 

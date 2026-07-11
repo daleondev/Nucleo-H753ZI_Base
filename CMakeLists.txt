@@ -74,8 +74,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     )
 endif()
 
-add_subdirectory(src/hal)
-add_subdirectory(runtime)
+add_subdirectory(platform/hal)
+add_subdirectory(platform/runtime)
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(platform/hal/tests)
+endif()
 add_subdirectory(src)
 
 if(ENABLE_CLANG_TIDY)

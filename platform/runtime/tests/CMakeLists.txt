@@ -47,7 +47,7 @@ target_compile_options(runtime_tests
         -Wpedantic
 )
 
-runtime_attach_threadx_startup(runtime_tests)
+runtime_attach(runtime_tests)
 
 add_test(NAME runtime COMMAND runtime_tests --gtest_color=no)
 set_tests_properties(runtime PROPERTIES TIMEOUT 30)
@@ -59,7 +59,7 @@ target_compile_definitions(runtime_terminate_probe
     PRIVATE
         RUNTIME_APPLICATION_THREAD_STACK_SIZE=65536U
 )
-runtime_attach_threadx_startup(runtime_terminate_probe)
+runtime_attach(runtime_terminate_probe)
 
 add_executable(runtime_static_terminate_probe
     ${CMAKE_CURRENT_SOURCE_DIR}/static_terminate_probe.cpp
@@ -68,7 +68,7 @@ target_compile_definitions(runtime_static_terminate_probe
     PRIVATE
         RUNTIME_APPLICATION_THREAD_STACK_SIZE=65536U
 )
-runtime_attach_threadx_startup(runtime_static_terminate_probe)
+runtime_attach(runtime_static_terminate_probe)
 
 add_executable(runtime_panic_override_probe
     ${CMAKE_CURRENT_SOURCE_DIR}/panic_override_probe.cpp
@@ -77,7 +77,7 @@ target_compile_definitions(runtime_panic_override_probe
     PRIVATE
         RUNTIME_APPLICATION_THREAD_STACK_SIZE=65536U
 )
-runtime_attach_threadx_startup(runtime_panic_override_probe)
+runtime_attach(runtime_panic_override_probe)
 
 add_test(
     NAME runtime.terminate.application

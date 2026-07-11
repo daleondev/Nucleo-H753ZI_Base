@@ -9,7 +9,7 @@ target_sources(runtime_libc
 
 target_link_libraries(runtime_libc
     PRIVATE
-        hal
+        platform::hal
     PUBLIC
         filex
         threadx
@@ -25,9 +25,7 @@ endif()
 
 target_include_directories(runtime_libc
     PUBLIC
-        ${PROJECT_SOURCE_DIR}/runtime
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/platform/runtime
 )
 
 target_compile_features(runtime_libc
