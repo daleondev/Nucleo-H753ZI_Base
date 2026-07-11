@@ -10,8 +10,14 @@ Ensure you have the following installed on your host machine:
 
 * [CMake](https://cmake.org/download/) (v3.22+)
 * [Ninja](https://ninja-build.org/)
+* [GCC](https://gcc.gnu.org/) 15 or 16 for Linux simulation
 * [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
+  15.2.Rel1 or 16.1 for STM32 firmware
 * [OpenOCD](https://openocd.org/)
+
+The runtime selects matching GCC 15.2 or GCC 16.1 libstdc++ integration
+sources at configure time. Other compiler major versions are rejected so a
+toolchain update cannot silently mix incompatible runtime internals.
 
 ## Linux Simulation & Testing
 
@@ -27,6 +33,7 @@ The project now exposes explicit presets for both targets:
 * `release-stm32`
 * `debug-linux`
 * `release-linux`
+* `runtime-test-stm32`
 
 ### Build STM32 Firmware
 
@@ -36,6 +43,17 @@ cmake --build --preset debug-stm32
 ```
 
 The STM32 artifacts are generated in `build/debug-stm32/`.
+
+To build the board-resident runtime conformance image:
+
+```sh
+cmake --preset runtime-test-stm32
+cmake --build --preset runtime-test-stm32
+```
+
+The image reports `0x600D600D` in
+`runtime_hardware_self_test_status` after all runtime phases pass. It can be
+flashed and inspected with OpenOCD even when no serial terminal is available.
 
 ### Build Linux Simulation
 

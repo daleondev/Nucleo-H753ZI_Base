@@ -15,8 +15,7 @@
         "--privileged"
     ],
     "mounts": [
-        "source=/dev/bus/usb,target=/dev/bus/usb,type=bind",
-        "source=/dev/ttyACM0,target=/dev/ttyACM0,type=bind"
+        "source=/dev/bus/usb,target=/dev/bus/usb,type=bind"
     ],
     "customizations": {
         "vscode": {

@@ -13,3 +13,6 @@
 [submodule "external/threadx"]
 	path = external/threadx
 	url = https://github.com/eclipse-threadx/threadx.git
+[submodule "external/filex"]
+	path = external/filex
+	url = https://github.com/eclipse-threadx/filex.git

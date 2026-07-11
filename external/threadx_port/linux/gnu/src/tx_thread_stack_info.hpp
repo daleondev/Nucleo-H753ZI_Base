@@ -6,9 +6,9 @@
 #include <stddef.h>
 
 #ifdef __cplusplus
-namespace Tx::Linux
+namespace tx::linux
 {
-    void refreshAllThreadsStackInfo();
+    void refresh_all_threads_stack_info();
 }
 
 extern "C" {
@@ -24,6 +24,8 @@ VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr);
 VOID _tx_linux_thread_stack_capture_current(TX_THREAD* thread_ptr);
 VOID _tx_linux_thread_stack_capture_signal_context(VOID* context);
 VOID _tx_linux_thread_stack_refresh(TX_THREAD* thread_ptr);
+VOID _tx_linux_thread_stack_release(TX_THREAD* thread_ptr);
+size_t _tx_linux_thread_stack_live_count(VOID);
 
 #ifdef __cplusplus
 }

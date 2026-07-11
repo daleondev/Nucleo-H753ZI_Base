@@ -5,17 +5,21 @@
 
 #include <cassert>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <system_error>
 
-namespace Tx::Linux
+namespace tx::linux
 {
     namespace
     {
+        std::atomic_size_t live_stack_info_count{};
+
         using ErrorType = decltype(TX_SUCCESS);
         enum class Error : ErrorType
         {
@@ -94,6 +98,7 @@ namespace Tx::Linux
             StackInfo(std::unique_ptr<std::byte[], CustomDeleter<free>>&& host_stack_base)
               : host_stack_base(std::move(host_stack_base))
             {
+                live_stack_info_count.fetch_add(1U, std::memory_order_relaxed);
             }
 
             ~StackInfo()
@@ -101,6 +106,7 @@ namespace Tx::Linux
                 if (signal_stack.ss_sp) {
                     delete[] static_cast<std::byte*>(signal_stack.ss_sp);
                 }
+                live_stack_info_count.fetch_sub(1U, std::memory_order_relaxed);
             }
 
             static StackInfo* of(TX_THREAD* thread)
@@ -120,6 +126,14 @@ namespace Tx::Linux
         }
 
         thread_local TX_THREAD* g_thread{ nullptr };
+
+        constexpr std::uintptr_t LOGICAL_STACK_ALIGNMENT{ alignof(ULONG) };
+        static_assert((LOGICAL_STACK_ALIGNMENT & (LOGICAL_STACK_ALIGNMENT - 1U)) == 0U);
+
+        [[nodiscard]] std::uintptr_t align_down(std::uintptr_t address) noexcept
+        {
+            return address & ~(LOGICAL_STACK_ALIGNMENT - 1U);
+        }
 
         std::optional<std::error_code> prepare(TX_THREAD* thread_ptr)
         {
@@ -182,7 +196,7 @@ namespace Tx::Linux
                 return make_error_code(Error::PTR_ERROR);
             }
 
-            auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) };
+            auto stack_info{ tx::linux::StackInfo::of(thread_ptr) };
             if (!stack_info) {
                 return make_error_code(Error::PTR_ERROR);
             }
@@ -191,7 +205,20 @@ namespace Tx::Linux
             auto stack_end{ reinterpret_cast<std::byte*>(thread_ptr->tx_thread_stack_end) };
             auto current_stack_ptr{ reinterpret_cast<std::byte*>(stack_ptr) };
             auto host_stack_base{ reinterpret_cast<std::byte*>(stack_info->host_stack_base.get()) };
-            auto logical_stack_size{ static_cast<size_t>(thread_ptr->tx_thread_stack_size) };
+            const auto logical_stack_bottom_address{
+              reinterpret_cast<std::uintptr_t>(stack_start) + sizeof(ULONG)
+            };
+            const auto logical_stack_top_address{
+              align_down(reinterpret_cast<std::uintptr_t>(stack_end) + 1U)
+            };
+            // Keep the same two-word reserve used by tx_thread_stack_build.
+            // ThreadX's stack checker also reads one ULONG before the reported
+            // high-water pointer, so the lowest representable pointer must
+            // remain at least one word above the lower guard.
+            if (logical_stack_top_address < logical_stack_bottom_address + (2U * sizeof(ULONG))) {
+                return make_error_code(Error::SIZE_ERROR);
+            }
+            const auto logical_stack_high_address{ logical_stack_top_address - (2U * sizeof(ULONG)) };
 
             if ((current_stack_ptr < host_stack_base) ||
                 (current_stack_ptr >= (host_stack_base + stack_info->host_stack_size))) {
@@ -202,21 +229,25 @@ namespace Tx::Linux
                 stack_info->baseline_host_stack_ptr = current_stack_ptr;
             }
 
-            std::byte* logical_stack_ptr{ nullptr };
+            std::uintptr_t logical_stack_address{};
             if (current_stack_ptr >= stack_info->baseline_host_stack_ptr) {
-                logical_stack_ptr = stack_end;
+                logical_stack_address = logical_stack_high_address;
             }
             else {
-                size_t host_stack_delta{ static_cast<size_t>(stack_info->baseline_host_stack_ptr -
-                                                             current_stack_ptr) };
-                if (host_stack_delta >= logical_stack_size) {
-                    logical_stack_ptr = stack_start;
+                const size_t host_stack_delta{ static_cast<size_t>(stack_info->baseline_host_stack_ptr -
+                                                                   current_stack_ptr) };
+                if (host_stack_delta >= logical_stack_high_address - logical_stack_bottom_address) {
+                    logical_stack_address = logical_stack_bottom_address;
                 }
                 else {
-                    logical_stack_ptr = stack_end - host_stack_delta;
+                    logical_stack_address = align_down(logical_stack_high_address - host_stack_delta);
+                    if (logical_stack_address < logical_stack_bottom_address) {
+                        logical_stack_address = logical_stack_bottom_address;
+                    }
                 }
             }
 
+            auto* const logical_stack_ptr{ reinterpret_cast<std::byte*>(logical_stack_address) };
             thread_ptr->tx_thread_stack_ptr = logical_stack_ptr;
 
 #ifdef TX_ENABLE_STACK_CHECKING
@@ -229,7 +260,7 @@ namespace Tx::Linux
         }
     }
 
-    void refreshAllThreadsStackInfo()
+    void refresh_all_threads_stack_info()
     {
         auto* first_thread{ _tx_thread_created_ptr };
         if (!first_thread || _tx_thread_created_count == 0U) {
@@ -246,7 +277,7 @@ namespace Tx::Linux
 
 UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr)
 {
-    if (auto error{ Tx::Linux::prepare(thread_ptr) }; error) {
+    if (auto error{ tx::linux::prepare(thread_ptr) }; error) {
         return static_cast<UINT>(error->value());
     }
     return TX_SUCCESS;
@@ -254,7 +285,7 @@ UINT _tx_linux_thread_stack_prepare_host(TX_THREAD* thread_ptr)
 
 VOID* _tx_linux_thread_stack_host_base(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         return stack_info->host_stack_base.get();
     }
     return nullptr;
@@ -262,48 +293,50 @@ VOID* _tx_linux_thread_stack_host_base(TX_THREAD* thread_ptr)
 
 size_t _tx_linux_thread_stack_host_size(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         return stack_info->host_stack_size;
     }
     return 0;
 }
 
-VOID _tx_linux_thread_stack_register(TX_THREAD* thread_ptr) { Tx::Linux::g_thread = thread_ptr; }
+VOID _tx_linux_thread_stack_register(TX_THREAD* thread_ptr) { tx::linux::g_thread = thread_ptr; }
 
-VOID _tx_linux_thread_stack_unregister(VOID) { Tx::Linux::g_thread = nullptr; }
+VOID _tx_linux_thread_stack_unregister(VOID) { tx::linux::g_thread = nullptr; }
 
 VOID _tx_linux_thread_stack_enable_signal_altstack(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         sigaltstack(&stack_info->signal_stack, nullptr);
     }
 }
 
 VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr)
 {
-    if (auto stack_info{ Tx::Linux::StackInfo::of(thread_ptr) }; stack_info) {
-        stack_info->baseline_host_stack_ptr = static_cast<std::byte*>(Tx::Linux::stackPtr());
-        thread_ptr->tx_thread_stack_ptr = thread_ptr->tx_thread_stack_end;
+    if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
+        stack_info->baseline_host_stack_ptr = static_cast<std::byte*>(tx::linux::stackPtr());
+        if (tx::linux::update(thread_ptr, stack_info->baseline_host_stack_ptr)) {
+            return;
+        }
 #ifdef TX_ENABLE_STACK_CHECKING
-        thread_ptr->tx_thread_stack_highest_ptr = thread_ptr->tx_thread_stack_end;
+        thread_ptr->tx_thread_stack_highest_ptr = thread_ptr->tx_thread_stack_ptr;
 #endif
     }
 }
 
 VOID _tx_linux_thread_stack_capture_current(TX_THREAD* thread_ptr)
 {
-    (void)Tx::Linux::update(thread_ptr, Tx::Linux::stackPtr());
+    (void)tx::linux::update(thread_ptr, tx::linux::stackPtr());
 }
 
 VOID _tx_linux_thread_stack_capture_signal_context(VOID* context)
 {
-    if (!Tx::Linux::g_thread || !context) {
+    if (!tx::linux::g_thread || !context) {
         return;
     }
 
     auto ucontext{ static_cast<ucontext_t*>(context) };
     auto stack_ptr{ reinterpret_cast<void*>(ucontext->uc_mcontext.gregs[REG_RSP]) };
-    (void)Tx::Linux::update(Tx::Linux::g_thread, stack_ptr);
+    (void)tx::linux::update(tx::linux::g_thread, stack_ptr);
 }
 
 VOID _tx_linux_thread_stack_refresh(TX_THREAD* thread_ptr)
@@ -315,4 +348,17 @@ VOID _tx_linux_thread_stack_refresh(TX_THREAD* thread_ptr)
     if (pthread_equal(thread_ptr->tx_thread_linux_thread_id, pthread_self())) {
         _tx_linux_thread_stack_capture_current(thread_ptr);
     }
+}
+
+VOID _tx_linux_thread_stack_release(TX_THREAD* thread_ptr)
+{
+    if (auto* stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info != nullptr) {
+        thread_ptr->tx_thread_extension_ptr = nullptr;
+        delete stack_info;
+    }
+}
+
+size_t _tx_linux_thread_stack_live_count(VOID)
+{
+    return tx::linux::live_stack_info_count.load(std::memory_order_relaxed);
 }

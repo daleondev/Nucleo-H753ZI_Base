@@ -25,7 +25,7 @@ set(ARM_CPU_FLAGS "-mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard")
 # Toolchain files are evaluated again in CMake's try_compile projects. Use the
 # *_INIT variables so flags are initialized once instead of repeatedly appended.
 set(CMAKE_C_FLAGS_INIT "${ARM_CPU_FLAGS} -fdata-sections -ffunction-sections")
-set(CMAKE_CXX_FLAGS_INIT "${ARM_CPU_FLAGS} -fdata-sections -ffunction-sections")
+set(CMAKE_CXX_FLAGS_INIT "${ARM_CPU_FLAGS} -fdata-sections -ffunction-sections -Wno-psabi")
 set(CMAKE_ASM_FLAGS_INIT "${ARM_CPU_FLAGS} -x assembler-with-cpp")
 
 set(CMAKE_C_FLAGS_DEBUG "-O0 -g3" CACHE STRING "C debug flags")

@@ -57,7 +57,8 @@ MEMORY
 {
 DTCMRAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 124K
 DTCM_STACK (xrw)      : ORIGIN = 0x2001F000, LENGTH = 4K
-AXI_SRAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
+AXI_SRAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 480K
+FILEX_RAM (xrw)     : ORIGIN = 0x24078000, LENGTH = 32K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 128K
 ETH_BUFFER_RAM (xrw)      : ORIGIN = 0x30020000, LENGTH = 128K
 ETH_DESCRIPTOR_RAM (xrw)      : ORIGIN = 0x30040000, LENGTH = 512
@@ -235,6 +236,22 @@ SECTIONS
 
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
+
+  /* FileX's volatile RAM disk has a dedicated, linker-accounted AXI SRAM
+   * region. This prevents it from overlapping application data or the heap. */
+  .filex_ram_disk (NOLOAD) :
+  {
+    . = ALIGN(32);
+    __filex_ram_disk_start__ = .;
+    KEEP(*(.filex_ram_disk))
+    . = ALIGN(32);
+    __filex_ram_disk_end__ = .;
+  } >FILEX_RAM
+
+  ASSERT(SIZEOF(.filex_ram_disk) <= LENGTH(FILEX_RAM),
+         "FileX RAM disk exceeds its dedicated AXI SRAM region")
+  ASSERT((__filex_ram_disk_start__ & 31) == 0,
+         "FileX RAM disk must be 32-byte aligned")
 
   /* Reserve the minimum heap in AXI SRAM. The application-owned _sbrk()
    * may grow from __HeapBase up to __HeapLimit. Keep this as the final

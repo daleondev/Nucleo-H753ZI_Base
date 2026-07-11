@@ -13,7 +13,7 @@ RUN apt update && apt install -y --no-install-recommends \
     gcc-15 \
     g++-15 \
     gdb \
-    clang-tidy \
+    clang-tidy-20 \
     openocd \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 100 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 100 \

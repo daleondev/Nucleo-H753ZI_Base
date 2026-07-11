@@ -1,355 +1,139 @@
-#include "hal_compat/platform_hal.hpp"
-#include "thread_diagnostics.hpp"
-
-#include <tx_api.h>
-#include <tx_thread.h>
+#include "hal/board/board.hpp"
+#include "hal/drivers/factory/ethernet.hpp"
+#include "hal/hal.hpp"
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <print>
+#include <span>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
 
 namespace
 {
-    constexpr size_t MAIN_THREAD_STACK_SIZE{ 4096 };
-    constexpr UINT MAIN_THREAD_PRIO{ 15 };
-    constexpr ULONG BLINK_PERIOD_MS{ 100 };
+    using namespace std::chrono_literals;
 
-#if defined(ENABLE_LIBC_LOCK_TEST)
-    constexpr size_t LIBC_LOCK_TEST_STACK_SIZE{ 2048 };
-    constexpr UINT LIBC_LOCK_TEST_PRIO{ 14 };
-    constexpr ULONG LIBC_LOCK_TEST_ITERATIONS{ 128 };
-    constexpr ULONG LIBC_LOCK_TEST_THREAD_COUNT{ 2 };
-#endif
+    constexpr auto CYCLE_INTERVAL{ 500ms };
+    constexpr auto FAILURE_BLINK_INTERVAL{ 100ms };
 
-#if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    constexpr size_t THREADSAFE_STATIC_TEST_STACK_SIZE{ 2048 };
-    constexpr UINT THREADSAFE_STATIC_TEST_PRIO{ 13 };
-    constexpr ULONG THREADSAFE_STATIC_TEST_THREAD_COUNT{ 2 };
-    constexpr ULONG THREADSAFE_STATIC_TEST_MAX_WAIT_TICKS{ 1000 };
-    constexpr std::uint32_t THREADSAFE_STATIC_TEST_VALUE{ 0x51A71C42U };
-#endif
+    static_assert(std::atomic_bool::is_always_lock_free);
+    std::atomic_bool user_button_press_pending{};
 
-    alignas(8) std::array<std::byte, MAIN_THREAD_STACK_SIZE> main_thread_stack{};
-    CHAR main_thread_name[] = "Main Thread";
-    TX_THREAD main_thread;
-
-#if defined(ENABLE_LIBC_LOCK_TEST)
-    alignas(8) std::array<std::byte, LIBC_LOCK_TEST_STACK_SIZE> libc_lock_test_stack_0{};
-    alignas(8) std::array<std::byte, LIBC_LOCK_TEST_STACK_SIZE> libc_lock_test_stack_1{};
-    CHAR libc_lock_test_name_0[] = "libc lock test 0";
-    CHAR libc_lock_test_name_1[] = "libc lock test 1";
-    CHAR libc_lock_test_done_name[] = "libc lock test done";
-    TX_THREAD libc_lock_test_thread_0;
-    TX_THREAD libc_lock_test_thread_1;
-    TX_SEMAPHORE libc_lock_test_done;
-#endif
-
-#if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_0{};
-    alignas(8) std::array<std::byte, THREADSAFE_STATIC_TEST_STACK_SIZE> threadsafe_static_test_stack_1{};
-    CHAR threadsafe_static_test_name_0[] = "static init test 0";
-    CHAR threadsafe_static_test_name_1[] = "static init test 1";
-    CHAR threadsafe_static_test_done_name[] = "static init done";
-    TX_THREAD threadsafe_static_test_thread_0;
-    TX_THREAD threadsafe_static_test_thread_1;
-    TX_SEMAPHORE threadsafe_static_test_done;
-    std::atomic_uint32_t threadsafe_static_test_access_count{};
-    std::atomic_uint32_t threadsafe_static_test_constructor_count{};
-
-    class ThreadsafeStaticTestSingleton;
-    std::array<ThreadsafeStaticTestSingleton*, THREADSAFE_STATIC_TEST_THREAD_COUNT>
-      threadsafe_static_test_instances{};
-#endif
-
-    constexpr ULONG milliseconds_to_ticks(ULONG milliseconds)
+    auto debug(std::string_view message) -> void
     {
-        const auto ticks = (milliseconds * TX_TIMER_TICKS_PER_SECOND + 999UL) / 1000UL;
-        return ticks == 0 ? 1UL : ticks;
+        static_cast<void>(std::fwrite(message.data(), sizeof(char), message.size(), stdout));
+        static_cast<void>(std::putchar('\n'));
+        static_cast<void>(std::fflush(stdout));
     }
 
-    void assert_tx_call(UINT status)
+    template<typename... Arguments>
+        requires(sizeof...(Arguments) > 0U)
+    auto debug(const char* pattern, Arguments... arguments) -> void
     {
-        if (status != TX_SUCCESS) {
-            Error_Handler();
-        }
+        static_cast<void>(std::printf(pattern, arguments...));
+        static_cast<void>(std::putchar('\n'));
+        static_cast<void>(std::fflush(stdout));
     }
 
-    void thread_stack_error_handler(TX_THREAD* thread)
+    auto report_user_button_press() -> void
     {
-        const auto* thread_name = thread != TX_NULL ? thread->tx_thread_name : "Unknown";
-        std::printf("Thread %s stack overflow detected\r\n", thread_name);
-        std::fflush(stdout);
-        Error_Handler();
-    }
-
-#if defined(ENABLE_LIBC_LOCK_TEST)
-    std::uint32_t hash_buffer(const char* buffer, std::size_t size)
-    {
-        std::uint32_t hash{ 2166136261U };
-
-        for (std::size_t index{}; index < size; ++index) {
-            hash ^= static_cast<std::uint8_t>(buffer[index]);
-            hash *= 16777619U;
-        }
-
-        return hash;
-    }
-
-    void libc_lock_test_worker(ULONG worker_id)
-    {
-        for (ULONG iteration{}; iteration < LIBC_LOCK_TEST_ITERATIONS; ++iteration) {
-            const std::size_t buffer_size{ 48U + ((worker_id * 7U + iteration) % 32U) };
-            auto* const buffer{ static_cast<char*>(std::malloc(buffer_size)) };
-
-            if (buffer == nullptr) {
-                Error_Handler();
-            }
-
-            const int written{ std::snprintf(buffer,
-                                             buffer_size,
-                                             "worker=%lu iteration=%lu",
-                                             static_cast<unsigned long>(worker_id),
-                                             static_cast<unsigned long>(iteration)) };
-
-            if (written < 0 || static_cast<std::size_t>(written) >= buffer_size || buffer[written] != '\0' ||
-                std::fflush(stdout) != 0) {
-                Error_Handler();
-            }
-
-            const std::size_t used_size{ static_cast<std::size_t>(written) + 1U };
-            const std::uint32_t expected_hash{ hash_buffer(buffer, used_size) };
-
-            /* Keep this allocation live while the peer exercises malloc and
-             * stdio. A one-tick time slice also permits preemption inside libc. */
-            tx_thread_relinquish();
-
-            if (hash_buffer(buffer, used_size) != expected_hash) {
-                Error_Handler();
-            }
-
-            std::free(buffer);
-        }
-
-        if (std::printf("[libc-lock-test] worker %lu passed\r\n", static_cast<unsigned long>(worker_id)) <
-              0 ||
-            std::fflush(stdout) != 0) {
+        static const auto yellow_led{ hal::board::createLed(hal::board::LedId::Yellow) };
+        if (yellow_led == nullptr) {
             Error_Handler();
         }
 
-        assert_tx_call(tx_semaphore_put(&libc_lock_test_done));
+        if (user_button_press_pending.exchange(false, std::memory_order_acq_rel)) {
+            debug("[input] user button pressed");
+            yellow_led->toggle();
+        }
     }
-#endif
 
-#if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    class ThreadsafeStaticTestSingleton
+    [[nodiscard]] auto run_filex_standard_library_sample() -> bool
     {
-      public:
-        ThreadsafeStaticTestSingleton()
+#if defined(HAL_PLATFORM_STM32)
+        namespace fs = std::filesystem;
+        constexpr std::string_view CONTENT{ "FileX through std::fstream\r\n" };
+        const fs::path directory{ "/sample" };
+        const fs::path file{ directory / "roundtrip.txt" };
+        std::error_code error;
+        static_cast<void>(fs::create_directory(directory, error));
+        if (error) {
+            return false;
+        }
+        std::string input(CONTENT.size(), '\0');
         {
-            threadsafe_static_test_constructor_count.fetch_add(1U, std::memory_order_relaxed);
-
-            /* Wait until the peer has reached the guarded initialization. With
-             * -fno-threadsafe-statics both threads enter this constructor; with
-             * a non-RTOS guard the peer fails instead of blocking. */
-            ULONG waited_ticks{};
-            while (threadsafe_static_test_access_count.load(std::memory_order_acquire) <
-                     THREADSAFE_STATIC_TEST_THREAD_COUNT &&
-                   waited_ticks < THREADSAFE_STATIC_TEST_MAX_WAIT_TICKS) {
-                tx_thread_sleep(1U);
-                ++waited_ticks;
+            std::fstream stream{ file, std::ios::in | std::ios::out | std::ios::binary | std::ios::trunc };
+            stream.write(CONTENT.data(), static_cast<std::streamsize>(CONTENT.size()));
+            stream.flush();
+            stream.seekg(0);
+            stream.read(input.data(), static_cast<std::streamsize>(input.size()));
+            if (!stream || stream.gcount() != static_cast<std::streamsize>(CONTENT.size())) {
+                return false;
             }
-
-            if (threadsafe_static_test_access_count.load(std::memory_order_acquire) !=
-                THREADSAFE_STATIC_TEST_THREAD_COUNT) {
-                Error_Handler();
-            }
-
-            m_value = THREADSAFE_STATIC_TEST_VALUE;
         }
-
-        std::uint32_t value() const { return m_value; }
-
-      private:
-        std::uint32_t m_value{};
-    };
-
-    ThreadsafeStaticTestSingleton& get_threadsafe_static_test_singleton()
-    {
-        static ThreadsafeStaticTestSingleton singleton;
-        return singleton;
+        const bool valid{ input == CONTENT && fs::is_regular_file(file, error) && !error &&
+                          fs::file_size(file, error) == CONTENT.size() && !error };
+        const bool file_removed{ fs::remove(file, error) };
+        const bool directory_removed{ !error && fs::remove(directory, error) };
+        return valid && file_removed && directory_removed && !error;
+#else
+        return true;
+#endif
     }
 
-    void threadsafe_static_test_worker(ULONG worker_id)
+    [[noreturn]] auto indicate_failure() -> void
     {
-        threadsafe_static_test_access_count.fetch_add(1U, std::memory_order_release);
-        auto& singleton = get_threadsafe_static_test_singleton();
-
-        if (worker_id >= threadsafe_static_test_instances.size() ||
-            singleton.value() != THREADSAFE_STATIC_TEST_VALUE) {
+        const auto red_led{ hal::board::createLed(hal::board::LedId::Red) };
+        if (red_led == nullptr) {
             Error_Handler();
         }
-
-        threadsafe_static_test_instances[worker_id] = &singleton;
-        assert_tx_call(tx_semaphore_put(&threadsafe_static_test_done));
-    }
-#endif
-
-    void tx_main(ULONG)
-    {
-#if defined(ENABLE_THREADSAFE_STATIC_TEST)
-        for (ULONG worker{}; worker < THREADSAFE_STATIC_TEST_THREAD_COUNT; ++worker) {
-            assert_tx_call(tx_semaphore_get(&threadsafe_static_test_done, TX_WAIT_FOREVER));
-        }
-
-        if (threadsafe_static_test_constructor_count.load(std::memory_order_acquire) != 1U ||
-            threadsafe_static_test_instances[0] == nullptr ||
-            threadsafe_static_test_instances[0] != threadsafe_static_test_instances[1] ||
-            threadsafe_static_test_instances[0]->value() != THREADSAFE_STATIC_TEST_VALUE) {
-            Error_Handler();
-        }
-
-        if (std::printf("[threadsafe-static-test] singleton initialized once\r\n") < 0 ||
-            std::fflush(stdout) != 0) {
-            Error_Handler();
-        }
-#endif
-
-#if defined(ENABLE_LIBC_LOCK_TEST)
-        for (ULONG worker{}; worker < LIBC_LOCK_TEST_THREAD_COUNT; ++worker) {
-            assert_tx_call(tx_semaphore_get(&libc_lock_test_done, TX_WAIT_FOREVER));
-        }
-
-        if (std::printf("[libc-lock-test] all workers passed\r\n") < 0 || std::fflush(stdout) != 0) {
-            Error_Handler();
-        }
-#endif
-
-        thread_diagnostics::printAll();
-
-        const auto blink_period_ticks{ milliseconds_to_ticks(BLINK_PERIOD_MS) };
-
+        debug("[ethercat] TEST FAILED - red LED indicates failure");
         while (true) {
-            assert_tx_call(
-              static_cast<UINT>(BSP_LED_Toggle(LED_GREEN) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE));
-            assert_tx_call(
-              static_cast<UINT>(BSP_LED_Toggle(LED_RED) == BSP_ERROR_NONE ? TX_SUCCESS : TX_NOT_DONE));
-            tx_thread_sleep(blink_period_ticks);
+            report_user_button_press();
+            red_led->toggle();
+            std::this_thread::sleep_for(FAILURE_BLINK_INTERVAL);
         }
     }
-} // namespace
-
-extern "C" void tx_application_define(void* first_unused_memory)
-{
-    static_cast<void>(first_unused_memory);
-
-    if (platform_init_libc_locks() != HAL_OK) {
-        Error_Handler();
-    }
-
-    assert_tx_call(tx_thread_stack_error_notify(thread_stack_error_handler));
-#if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    assert_tx_call(tx_semaphore_create(&threadsafe_static_test_done, threadsafe_static_test_done_name, 0));
-#endif
-#if defined(ENABLE_LIBC_LOCK_TEST)
-    assert_tx_call(tx_semaphore_create(&libc_lock_test_done, libc_lock_test_done_name, 0));
-#endif
-
-    assert_tx_call(tx_thread_create(&main_thread,
-                                    main_thread_name,
-                                    tx_main,
-                                    0,
-                                    main_thread_stack.data(),
-                                    static_cast<ULONG>(main_thread_stack.size()),
-                                    MAIN_THREAD_PRIO,
-                                    MAIN_THREAD_PRIO,
-                                    TX_NO_TIME_SLICE,
-                                    TX_AUTO_START));
-
-#if defined(ENABLE_LIBC_LOCK_TEST)
-    assert_tx_call(tx_thread_create(&libc_lock_test_thread_0,
-                                    libc_lock_test_name_0,
-                                    libc_lock_test_worker,
-                                    0,
-                                    libc_lock_test_stack_0.data(),
-                                    static_cast<ULONG>(libc_lock_test_stack_0.size()),
-                                    LIBC_LOCK_TEST_PRIO,
-                                    LIBC_LOCK_TEST_PRIO,
-                                    1,
-                                    TX_AUTO_START));
-    assert_tx_call(tx_thread_create(&libc_lock_test_thread_1,
-                                    libc_lock_test_name_1,
-                                    libc_lock_test_worker,
-                                    1,
-                                    libc_lock_test_stack_1.data(),
-                                    static_cast<ULONG>(libc_lock_test_stack_1.size()),
-                                    LIBC_LOCK_TEST_PRIO,
-                                    LIBC_LOCK_TEST_PRIO,
-                                    1,
-                                    TX_AUTO_START));
-#endif
-
-#if defined(ENABLE_THREADSAFE_STATIC_TEST)
-    assert_tx_call(tx_thread_create(&threadsafe_static_test_thread_0,
-                                    threadsafe_static_test_name_0,
-                                    threadsafe_static_test_worker,
-                                    0,
-                                    threadsafe_static_test_stack_0.data(),
-                                    static_cast<ULONG>(threadsafe_static_test_stack_0.size()),
-                                    THREADSAFE_STATIC_TEST_PRIO,
-                                    THREADSAFE_STATIC_TEST_PRIO,
-                                    1,
-                                    TX_AUTO_START));
-    assert_tx_call(tx_thread_create(&threadsafe_static_test_thread_1,
-                                    threadsafe_static_test_name_1,
-                                    threadsafe_static_test_worker,
-                                    1,
-                                    threadsafe_static_test_stack_1.data(),
-                                    static_cast<ULONG>(threadsafe_static_test_stack_1.size()),
-                                    THREADSAFE_STATIC_TEST_PRIO,
-                                    THREADSAFE_STATIC_TEST_PRIO,
-                                    1,
-                                    TX_AUTO_START));
-#endif
 }
 
-int main(void)
+int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 {
-    MPU_Config_User();
-    SCB_EnableICache();
-    SCB_EnableDCache();
+    if (!run_filex_standard_library_sample()) {
+        debug("[filex] std::fstream/std::filesystem sample failed");
+        indicate_failure();
+    }
+    debug("[filex] std::fstream/std::filesystem sample passed");
+    std::println("test");
 
-    HAL_Init();
+    const auto user_button{ hal::board::createButton(hal::board::ButtonId::User) };
+    if (user_button == nullptr) {
+        debug("[input] user button creation failed");
+        indicate_failure();
+    }
+    user_button->setStateChangedCallback([](hal::device::IButton::State state) noexcept {
+        if (state == hal::device::IButton::State::Pressed) {
+            user_button_press_pending.store(true, std::memory_order_release);
+        }
+    });
 
-    SystemClock_Config();
-
-    MX_GPIO_Init();
-    MX_ETH_Init();
-    MX_RTC_Init();
-    MX_TIM2_Init();
-    MX_RNG_Init();
-
-    BSP_LED_Init(LED_GREEN);
-    BSP_LED_Init(LED_RED);
-    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
-
-    BspCOMInit.BaudRate = 115200;
-    BspCOMInit.WordLength = COM_WORDLENGTH_8B;
-    BspCOMInit.StopBits = COM_STOPBITS_1;
-    BspCOMInit.Parity = COM_PARITY_NONE;
-    BspCOMInit.HwFlowCtl = COM_HWCONTROL_NONE;
-
-    if (BSP_COM_Init(COM1, &BspCOMInit) != BSP_ERROR_NONE) {
-        Error_Handler();
+    const auto green_led{ hal::board::createLed(hal::board::LedId::Green) };
+    if (green_led == nullptr) {
+        debug("[output] green LED creation failed");
+        indicate_failure();
     }
 
-    if (HAL_TIM_Base_Start(&htim2) != HAL_OK) {
-        Error_Handler();
+    while (true) {
+        report_user_button_press();
+        green_led->toggle();
+        std::this_thread::sleep_for(CYCLE_INTERVAL);
     }
-
-    tx_kernel_enter();
-
-    Error_Handler();
+    indicate_failure();
 }
