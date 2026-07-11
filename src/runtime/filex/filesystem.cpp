@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <fcntl.h>
 #include <limits>
+#include <ranges>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/times.h>
@@ -155,12 +156,16 @@ namespace
     [[nodiscard]] auto usable() noexcept -> bool
     {
 #if defined(HAL_PLATFORM_STM32)
-        if (__get_IPSR() != 0U || !filesystem_initialized) {
-            errno = __get_IPSR() != 0U ? EPERM : ENODEV;
+        if (__get_IPSR() != 0U) {
+            errno = EPERM;
             return false;
         }
 #endif
-        return filesystem_initialized;
+        if (!filesystem_initialized) {
+            errno = ENODEV;
+            return false;
+        }
+        return true;
     }
 
     [[nodiscard]] auto normalize_path_unlocked(const char* path,
@@ -234,13 +239,31 @@ namespace
         return 0;
     }
 
+    [[nodiscard]] constexpr auto fold_ascii_case(char character) noexcept -> unsigned char
+    {
+        const auto value{ static_cast<unsigned char>(character) };
+        return value >= static_cast<unsigned char>('a') && value <= static_cast<unsigned char>('z')
+                 ? static_cast<unsigned char>(value - static_cast<unsigned char>('a') +
+                                              static_cast<unsigned char>('A'))
+                 : value;
+    }
+
     [[nodiscard]] auto path_has_prefix(const char* path,
                                        const char* prefix,
                                        bool include_descendants) noexcept -> bool
     {
         const std::size_t prefix_length{ std::strlen(prefix) };
-        return std::strncmp(path, prefix, prefix_length) == 0 &&
-               (path[prefix_length] == '\0' || (include_descendants && path[prefix_length] == '/'));
+        for (std::size_t index{}; index < prefix_length; ++index) {
+            if (fold_ascii_case(path[index]) != fold_ascii_case(prefix[index])) {
+                return false;
+            }
+        }
+        return path[prefix_length] == '\0' || (include_descendants && path[prefix_length] == '/');
+    }
+
+    [[nodiscard]] auto paths_equal(const char* first, const char* second) noexcept -> bool
+    {
+        return path_has_prefix(first, second, false);
     }
 
     [[nodiscard]] auto migrated_path_length(const char* path,
@@ -362,7 +385,7 @@ namespace
         value->st_nlink = 1;
         std::uint32_t inode{ 2166136261U };
         for (const auto* cursor{ reinterpret_cast<const unsigned char*>(path) }; *cursor != 0U; ++cursor) {
-            inode = (inode ^ *cursor) * 16777619U;
+            inode = (inode ^ fold_ascii_case(static_cast<char>(*cursor))) * 16777619U;
         }
         value->st_ino = inode;
         value->st_size = static_cast<off_t>(information.size);
@@ -612,7 +635,7 @@ extern "C" int _close(int file)
 extern "C" int _read(int file, char* buffer, int length)
 {
     if (length < 0 || (buffer == nullptr && length != 0)) {
-        errno = EINVAL;
+        errno = length < 0 ? EINVAL : EFAULT;
         return -1;
     }
     if (file == STDIN_FILENO) {
@@ -642,6 +665,9 @@ extern "C" int _read(int file, char* buffer, int length)
         errno = descriptor == nullptr ? errno : EBADF;
         return -1;
     }
+    if (length == 0) {
+        return 0;
+    }
     const int mode_error{ switch_mode(*descriptor, FX_OPEN_FOR_READ) };
     if (mode_error != 0) {
         errno = mode_error;
@@ -660,7 +686,7 @@ extern "C" int _read(int file, char* buffer, int length)
 extern "C" int _write(int file, const char* buffer, int length)
 {
     if (length < 0 || (buffer == nullptr && length != 0)) {
-        errno = EINVAL;
+        errno = length < 0 ? EINVAL : EFAULT;
         return -1;
     }
     if (file == STDOUT_FILENO || file == STDERR_FILENO) {
@@ -687,6 +713,9 @@ extern "C" int _write(int file, const char* buffer, int length)
     if (descriptor == nullptr || !descriptor->writable) {
         errno = descriptor == nullptr ? errno : EBADF;
         return -1;
+    }
+    if (length == 0) {
+        return 0;
     }
     int error{ switch_mode(*descriptor, FX_OPEN_FOR_WRITE) };
     if (error == 0 && descriptor->append) {
@@ -823,7 +852,7 @@ extern "C" int _stat(const char* path, struct stat* value)
     }
     for (const auto& descriptor : descriptors) {
         if (descriptor.allocated && descriptor.open_mode >= 0 &&
-            std::strcmp(descriptor.path.data(), normalized) == 0) {
+            paths_equal(descriptor.path.data(), normalized)) {
             info.size = std::max<std::uint64_t>(info.size, descriptor.file.fx_file_current_file_size);
         }
     }
@@ -881,7 +910,19 @@ extern "C" int _rename(const char* old_path, const char* new_path)
         const bool source_is_directory{ (info.attributes & FX_DIRECTORY) != 0U };
         const bool include_descendants{ source_is_directory };
 
+        const bool spelling_changed{ std::strcmp(old_name, new_name) != 0 };
+        const bool destination_is_source{ paths_equal(old_name, new_name) };
+        if (source_is_directory && !destination_is_source &&
+            path_has_prefix(new_name, old_name, true)) {
+            // FileX accepts this move and orphans the directory tree. POSIX
+            // rename must reject moving a directory below itself.
+            error = EINVAL;
+        }
+
         for (const auto& descriptor : descriptors) {
+            if (error != 0) {
+                break;
+            }
             if (descriptor.allocated &&
                 migrated_path_length(descriptor.path.data(), old_name, new_name, include_descendants) >=
                   MAXIMUM_PATH) {
@@ -907,7 +948,7 @@ extern "C" int _rename(const char* old_path, const char* new_path)
 
         bool destination_exists{};
         bool destination_is_directory{};
-        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+        if (error == 0 && spelling_changed) {
             EntryInformation destination_info{};
             const int destination_error{ information_unlocked(new_name, destination_info) };
             if (destination_error == 0) {
@@ -916,7 +957,8 @@ extern "C" int _rename(const char* old_path, const char* new_path)
                 if (source_is_directory != destination_is_directory) {
                     error = source_is_directory ? ENOTDIR : EISDIR;
                 }
-                else if (source_is_directory && path_has_prefix(current_directory.data(), new_name, true)) {
+                else if (!destination_is_source && source_is_directory &&
+                         path_has_prefix(current_directory.data(), new_name, true)) {
                     // FileX has no anonymous directory handle with which to keep
                     // a replaced current working directory alive.
                     error = EBUSY;
@@ -927,35 +969,31 @@ extern "C" int _rename(const char* old_path, const char* new_path)
             }
         }
 
-        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
-            /* Close matching FileX handles before moving their directory
-             * entries. The adapter retains allocation, permissions, append
-             * state, and logical position, then lazily reopens the migrated
-             * path on its next operation. */
-            for (auto& descriptor : descriptors) {
-                if (descriptor.allocated && descriptor.open_mode >= 0 &&
-                    path_has_prefix(descriptor.path.data(), old_name, include_descendants)) {
-                    const UINT close_status{ fx_file_close(&descriptor.file) };
-                    descriptor.open_mode = -1;
-                    if (close_status != FX_SUCCESS) {
-                        error = filex_errno(close_status);
-                        break;
-                    }
-                }
+        if (error == 0 && spelling_changed) {
+            const bool source_is_open{ std::ranges::any_of(descriptors, [&](const auto& descriptor) {
+                return descriptor.allocated && descriptor.open_mode >= 0 &&
+                       path_has_prefix(descriptor.path.data(), old_name, include_descendants);
+            }) };
+            if (source_is_open) {
+                // FileX rename copies the on-media directory entry before it
+                // updates open handles. Flush modified source handles first or
+                // a later mode switch can reopen a stale size/cluster entry as
+                // FX_FILE_CORRUPT.
+                error = filex_errno(fx_media_flush(&media));
             }
         }
 
-        if (error == 0 && destination_exists) {
+        if (error == 0 && destination_exists && !destination_is_source) {
             error = filex_errno(destination_is_directory ? fx_directory_delete(&media, new_name)
                                                          : fx_file_delete(&media, new_name));
         }
 
-        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+        if (error == 0 && spelling_changed) {
             const UINT status{ source_is_directory ? fx_directory_rename(&media, old_name, new_name)
                                                    : fx_file_rename(&media, old_name, new_name) };
             error = filex_errno(status);
         }
-        if (error == 0 && std::strcmp(old_name, new_name) != 0) {
+        if (error == 0 && spelling_changed) {
             for (auto& descriptor : descriptors) {
                 if (descriptor.allocated) {
                     migrate_path(descriptor.path, old_name, new_name, include_descendants);
@@ -1013,6 +1051,11 @@ extern "C" int _rmdir(const char* path)
     if (error == 0) {
         if ((info.attributes & FX_DIRECTORY) == 0U) {
             error = ENOTDIR;
+        }
+        else if (path_has_prefix(current_directory.data(), normalized, true)) {
+            // FileX does not track a process working directory. Removing it
+            // here would leave the adapter's current_directory dangling.
+            error = EBUSY;
         }
         else {
             error = filex_errno(fx_directory_delete(&media, normalized));

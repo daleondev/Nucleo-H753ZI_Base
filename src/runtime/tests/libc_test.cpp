@@ -120,3 +120,15 @@ TEST(RuntimeLibc, RetargetedGettimeofdayUsesRealtimeClock)
     EXPECT_GE(value.tv_usec, 0);
     EXPECT_LT(value.tv_usec, 1'000'000);
 }
+
+#if defined(HAL_PLATFORM_LINUX)
+TEST(RuntimeLibc, ThreadXSuspendSignalsPreserveErrno)
+{
+    errno = ERANGE;
+    for (std::size_t iteration{}; iteration < 25'000'000U; ++iteration) {
+        std::atomic_signal_fence(std::memory_order_seq_cst);
+    }
+    const int preserved_errno{ errno };
+    EXPECT_EQ(preserved_errno, ERANGE);
+}
+#endif

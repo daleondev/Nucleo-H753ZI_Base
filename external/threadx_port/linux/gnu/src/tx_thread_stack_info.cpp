@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 
 #include <atomic>
@@ -126,6 +127,14 @@ namespace tx::linux
 
         thread_local TX_THREAD* g_thread{ nullptr };
 
+        constexpr std::uintptr_t LOGICAL_STACK_ALIGNMENT{ alignof(ULONG) };
+        static_assert((LOGICAL_STACK_ALIGNMENT & (LOGICAL_STACK_ALIGNMENT - 1U)) == 0U);
+
+        [[nodiscard]] std::uintptr_t align_down(std::uintptr_t address) noexcept
+        {
+            return address & ~(LOGICAL_STACK_ALIGNMENT - 1U);
+        }
+
         std::optional<std::error_code> prepare(TX_THREAD* thread_ptr)
         {
             assert(thread_ptr);
@@ -196,7 +205,20 @@ namespace tx::linux
             auto stack_end{ reinterpret_cast<std::byte*>(thread_ptr->tx_thread_stack_end) };
             auto current_stack_ptr{ reinterpret_cast<std::byte*>(stack_ptr) };
             auto host_stack_base{ reinterpret_cast<std::byte*>(stack_info->host_stack_base.get()) };
-            auto logical_stack_size{ static_cast<size_t>(thread_ptr->tx_thread_stack_size) };
+            const auto logical_stack_bottom_address{
+              reinterpret_cast<std::uintptr_t>(stack_start) + sizeof(ULONG)
+            };
+            const auto logical_stack_top_address{
+              align_down(reinterpret_cast<std::uintptr_t>(stack_end) + 1U)
+            };
+            // Keep the same two-word reserve used by tx_thread_stack_build.
+            // ThreadX's stack checker also reads one ULONG before the reported
+            // high-water pointer, so the lowest representable pointer must
+            // remain at least one word above the lower guard.
+            if (logical_stack_top_address < logical_stack_bottom_address + (2U * sizeof(ULONG))) {
+                return make_error_code(Error::SIZE_ERROR);
+            }
+            const auto logical_stack_high_address{ logical_stack_top_address - (2U * sizeof(ULONG)) };
 
             if ((current_stack_ptr < host_stack_base) ||
                 (current_stack_ptr >= (host_stack_base + stack_info->host_stack_size))) {
@@ -207,21 +229,25 @@ namespace tx::linux
                 stack_info->baseline_host_stack_ptr = current_stack_ptr;
             }
 
-            std::byte* logical_stack_ptr{ nullptr };
+            std::uintptr_t logical_stack_address{};
             if (current_stack_ptr >= stack_info->baseline_host_stack_ptr) {
-                logical_stack_ptr = stack_end;
+                logical_stack_address = logical_stack_high_address;
             }
             else {
-                size_t host_stack_delta{ static_cast<size_t>(stack_info->baseline_host_stack_ptr -
-                                                             current_stack_ptr) };
-                if (host_stack_delta >= logical_stack_size) {
-                    logical_stack_ptr = stack_start;
+                const size_t host_stack_delta{ static_cast<size_t>(stack_info->baseline_host_stack_ptr -
+                                                                   current_stack_ptr) };
+                if (host_stack_delta >= logical_stack_high_address - logical_stack_bottom_address) {
+                    logical_stack_address = logical_stack_bottom_address;
                 }
                 else {
-                    logical_stack_ptr = stack_end - host_stack_delta;
+                    logical_stack_address = align_down(logical_stack_high_address - host_stack_delta);
+                    if (logical_stack_address < logical_stack_bottom_address) {
+                        logical_stack_address = logical_stack_bottom_address;
+                    }
                 }
             }
 
+            auto* const logical_stack_ptr{ reinterpret_cast<std::byte*>(logical_stack_address) };
             thread_ptr->tx_thread_stack_ptr = logical_stack_ptr;
 
 #ifdef TX_ENABLE_STACK_CHECKING
@@ -288,9 +314,11 @@ VOID _tx_linux_thread_stack_calibrate(TX_THREAD* thread_ptr)
 {
     if (auto stack_info{ tx::linux::StackInfo::of(thread_ptr) }; stack_info) {
         stack_info->baseline_host_stack_ptr = static_cast<std::byte*>(tx::linux::stackPtr());
-        thread_ptr->tx_thread_stack_ptr = thread_ptr->tx_thread_stack_end;
+        if (tx::linux::update(thread_ptr, stack_info->baseline_host_stack_ptr)) {
+            return;
+        }
 #ifdef TX_ENABLE_STACK_CHECKING
-        thread_ptr->tx_thread_stack_highest_ptr = thread_ptr->tx_thread_stack_end;
+        thread_ptr->tx_thread_stack_highest_ptr = thread_ptr->tx_thread_stack_ptr;
 #endif
     }
 }

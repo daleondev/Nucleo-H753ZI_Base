@@ -74,7 +74,7 @@ namespace
     static_assert(sizeof(exception_globals_storage) == 12U);
 }
 
-extern "C" auto __aeabi_read_tp() noexcept -> void*
+extern "C" [[gnu::noinline]] auto runtime_tls_read_thread_pointer() noexcept -> void*
 {
     if (TX_THREAD* const current{ tx_thread_identify() }; current != TX_NULL) {
         if (current->tx_thread_runtime_tls_block == nullptr) {
@@ -85,6 +85,18 @@ extern "C" auto __aeabi_read_tp() noexcept -> void*
 
     const auto startup_data{ reinterpret_cast<std::uintptr_t>(__tls_base) };
     return reinterpret_cast<void*>(startup_data - linker_value(__arm32_tls_tcb_offset));
+}
+
+// __aeabi_read_tp uses the special Arm EABI thread-pointer helper convention:
+// callers may keep a TLS relocation offset live in r1-r3 across the call. A
+// normal C/C++ implementation is allowed to clobber those registers, so keep
+// the policy in a regular helper and provide the ABI entry point as a naked
+// wrapper that preserves r1-r3 and lr. r0 carries the returned thread pointer.
+extern "C" [[gnu::naked]] auto __aeabi_read_tp() noexcept -> void*
+{
+    __asm volatile("push {r1, r2, r3, lr}\n"
+                   "bl runtime_tls_read_thread_pointer\n"
+                   "pop {r1, r2, r3, pc}\n");
 }
 
 extern "C" auto runtime_tls_thread_create(TX_THREAD* thread) noexcept -> void

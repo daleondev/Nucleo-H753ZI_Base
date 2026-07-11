@@ -41,6 +41,7 @@ namespace
 
         void TearDown() override
         {
+            static_cast<void>(runtime::filex::setCurrentPath("/"));
             static_cast<void>(_unlink("/renamed.bin"));
             static_cast<void>(_unlink("/mode.bin"));
             static_cast<void>(_unlink("/append.bin"));
@@ -49,17 +50,22 @@ namespace
             static_cast<void>(_unlink("/seek-overflow.bin"));
             static_cast<void>(_unlink("/rename-source.bin"));
             static_cast<void>(_unlink("/rename-destination.bin"));
+            static_cast<void>(_unlink("/case-name.bin"));
+            static_cast<void>(_unlink("/mixed-target.bin"));
             static_cast<void>(_unlink("/renamed-cwd/child/relative.bin"));
             static_cast<void>(_rmdir("/renamed-cwd/child"));
             static_cast<void>(_rmdir("/renamed-cwd"));
             static_cast<void>(_rmdir("/original-cwd/child"));
             static_cast<void>(_rmdir("/original-cwd"));
+            static_cast<void>(_rmdir("/self-tree/child/grandchild"));
+            static_cast<void>(_rmdir("/self-tree/child"));
+            static_cast<void>(_rmdir("/self-tree"));
+            static_cast<void>(_rmdir("/working-directory"));
             static_cast<void>(_rmdir("/directory"));
             for (unsigned index{}; index < 4U; ++index) {
                 const std::string path{ "/concurrent" + std::to_string(index) };
                 static_cast<void>(_unlink(path.c_str()));
             }
-            static_cast<void>(runtime::filex::setCurrentPath("/"));
         }
     };
 }
@@ -112,6 +118,22 @@ TEST_F(FileXTest, NewlibDescriptorRoundTripAndMetadata)
     EXPECT_TRUE(S_ISREG(metadata.st_mode));
 }
 
+TEST_F(FileXTest, ZeroLengthFileIoAcceptsNullBuffersForValidDescriptors)
+{
+    const int file{ _open("/mode.bin", O_CREAT | O_RDWR | O_TRUNC, 0666) };
+    ASSERT_GE(file, 3);
+    EXPECT_EQ(_read(file, nullptr, 0), 0);
+    EXPECT_EQ(_write(file, nullptr, 0), 0);
+
+    errno = 0;
+    EXPECT_EQ(_read(99, nullptr, 0), -1);
+    EXPECT_EQ(errno, EBADF);
+    errno = 0;
+    EXPECT_EQ(_write(99, nullptr, 0), -1);
+    EXPECT_EQ(errno, EBADF);
+    EXPECT_EQ(_close(file), 0);
+}
+
 TEST_F(FileXTest, ConsoleIoValidatesBuffersAndReportsPartialTransfers)
 {
     console_input_calls = 0;
@@ -124,10 +146,10 @@ TEST_F(FileXTest, ConsoleIoValidatesBuffersAndReportsPartialTransfers)
 
     errno = 0;
     EXPECT_EQ(_read(STDIN_FILENO, nullptr, 1), -1);
-    EXPECT_EQ(errno, EINVAL);
+    EXPECT_EQ(errno, EFAULT);
     errno = 0;
     EXPECT_EQ(_write(STDERR_FILENO, nullptr, 1), -1);
-    EXPECT_EQ(errno, EINVAL);
+    EXPECT_EQ(errno, EFAULT);
 
     char input[4]{};
     console_input_calls = 0;
@@ -199,20 +221,69 @@ TEST_F(FileXTest, RenameReplacesDestinationAndPreservesOpenSourceDescriptor)
 
 TEST_F(FileXTest, RenameMigratesCurrentDirectoryAndRelativePaths)
 {
-    ASSERT_EQ(_mkdir("/original-cwd", 0777), 0);
-    ASSERT_EQ(_mkdir("/original-cwd/child", 0777), 0);
+    ASSERT_EQ(_mkdir("/Original-Cwd", 0777), 0);
+    ASSERT_EQ(_mkdir("/Original-Cwd/child", 0777), 0);
     ASSERT_EQ(runtime::filex::setCurrentPath("/original-cwd/child"), 0);
-    ASSERT_EQ(_rename("/original-cwd", "/renamed-cwd"), 0);
+    ASSERT_EQ(_rename("/ORIGINAL-CWD", "/RENAMED-CWD"), 0);
 
     char current[runtime::filex::MAXIMUM_PATH]{};
     EXPECT_EQ(runtime::filex::currentPath(current), 0);
-    EXPECT_STREQ(current, "/renamed-cwd/child");
+    EXPECT_STREQ(current, "/RENAMED-CWD/child");
 
     const int file{ _open("relative.bin", O_CREAT | O_WRONLY | O_TRUNC, 0666) };
     ASSERT_GE(file, 3);
     EXPECT_EQ(_close(file), 0);
     struct stat metadata{};
     EXPECT_EQ(_stat("/renamed-cwd/child/relative.bin", &metadata), 0);
+}
+
+TEST_F(FileXTest, CaseInsensitiveAliasesPreserveIdentityAndOpenDescriptors)
+{
+    const int file{ _open("/Case-Name.bin", O_CREAT | O_RDWR | O_TRUNC, 0666) };
+    ASSERT_GE(file, 3);
+    constexpr char payload[]{ "case-insensitive FileX identity" };
+    ASSERT_EQ(_write(file, payload, sizeof(payload)), static_cast<int>(sizeof(payload)));
+
+    ASSERT_EQ(_rename("/case-name.bin", "/CASE-NAME.BIN"), 0);
+    struct stat upper_metadata{};
+    struct stat lower_metadata{};
+    ASSERT_EQ(_stat("/CASE-NAME.BIN", &upper_metadata), 0);
+    ASSERT_EQ(_stat("/case-name.bin", &lower_metadata), 0);
+    EXPECT_EQ(upper_metadata.st_ino, lower_metadata.st_ino);
+
+    ASSERT_EQ(_rename("/case-name.bin", "/Mixed-Target.bin"), 0);
+    ASSERT_EQ(_lseek(file, 0, SEEK_SET), 0);
+    std::array<char, sizeof(payload)> result{};
+    EXPECT_EQ(_read(file, result.data(), result.size()), static_cast<int>(result.size()));
+    EXPECT_EQ(result, std::to_array(payload));
+    EXPECT_EQ(_close(file), 0);
+
+    struct stat metadata{};
+    errno = 0;
+    EXPECT_EQ(_stat("/case-name.bin", &metadata), -1);
+    EXPECT_EQ(errno, ENOENT);
+    EXPECT_EQ(_stat("/mixed-target.bin", &metadata), 0);
+}
+
+TEST_F(FileXTest, RejectsDirectoryMovesBelowItselfAndRemovalOfCurrentDirectory)
+{
+    ASSERT_EQ(_mkdir("/self-tree", 0777), 0);
+    ASSERT_EQ(_mkdir("/self-tree/child", 0777), 0);
+    errno = 0;
+    EXPECT_EQ(_rename("/self-tree", "/self-tree/child/grandchild"), -1);
+    EXPECT_EQ(errno, EINVAL);
+
+    struct stat metadata{};
+    EXPECT_EQ(_stat("/self-tree", &metadata), 0);
+    EXPECT_EQ(_stat("/self-tree/child", &metadata), 0);
+
+    ASSERT_EQ(_mkdir("/working-directory", 0777), 0);
+    ASSERT_EQ(runtime::filex::setCurrentPath("/working-directory"), 0);
+    errno = 0;
+    EXPECT_EQ(_rmdir("/WORKING-DIRECTORY"), -1);
+    EXPECT_EQ(errno, EBUSY);
+    ASSERT_EQ(runtime::filex::setCurrentPath("/"), 0);
+    EXPECT_EQ(_rmdir("/working-directory"), 0);
 }
 
 TEST_F(FileXTest, AppendAndTruncateAreDeterministic)

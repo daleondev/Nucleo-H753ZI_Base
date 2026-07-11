@@ -19,21 +19,28 @@
  void    _tx_linux_thread_suspend(pthread_t thread_id);
  
  #ifdef TX_LINUX_DEBUG_ENABLE
-@@ -376,14 +377,20 @@
+@@ -376,14 +377,27 @@
  }
  
  /* Define functions for linux thread. */
 -void    _tx_linux_thread_resume_handler(int sig)
 +void    _tx_linux_thread_resume_handler(int sig, siginfo_t* info, void* context)
  {
++    int saved_errno;
++
++    saved_errno = errno;
      (VOID)sig;
 +    (VOID)info;
 +    (VOID)context;
++    errno = saved_errno;
  }
  
 -void    _tx_linux_thread_suspend_handler(int sig)
 +void    _tx_linux_thread_suspend_handler(int sig, siginfo_t* info, void* context)
  {
++    int saved_errno;
++
++    saved_errno = errno;
      (VOID)sig;
 +    (VOID)info;
 +
@@ -42,7 +49,19 @@
  
      if(pthread_equal(pthread_self(), _tx_linux_timer_id))
          tx_linux_sem_post_nolock(&_tx_linux_thread_timer_wait);
-@@ -434,11 +441,11 @@
+@@ -393,2 +407,5 @@
+     if(_tx_linux_thread_suspended)
++    {
++        errno = saved_errno;
+         return;
++    }
+@@ -396,4 +413,5 @@
+     _tx_linux_thread_suspended = 1;
+     sigsuspend(&_tx_linux_thread_wait_mask);
+     _tx_linux_thread_suspended = 0;
++    errno = saved_errno;
+ }
+@@ -434,11 +452,11 @@
      sigdelset(&_tx_linux_thread_wait_mask, RESUME_SIG);
  
      sigfillset(&sa.sa_mask);

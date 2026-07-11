@@ -1548,9 +1548,11 @@ extern "C" void runtime_libstdcxx_thread_entry(ULONG)
 
 extern "C" void runtime_libstdcxx_thread_notify(TX_THREAD* thread, UINT event)
 {
-    if (event == TX_THREAD_EXIT) {
-        // Forced termination does not return through the wrapper. Keep the
-        // notification as an idempotent fallback for that path.
+    if (event == TX_THREAD_EXIT && thread == tx_thread_identify()) {
+        // Self-termination does not return through the wrapper, but still
+        // executes in the departing thread's TLS context. External forced
+        // termination cannot safely run C++ TLS/TSS callbacks in the caller;
+        // those registrations are discarded when ThreadX deletes the target.
         cleanup_thread_runtime(thread);
     }
 }

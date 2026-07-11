@@ -26,8 +26,10 @@
 #include <ranges>
 #include <regex>
 #include <semaphore>
+#include <shared_mutex>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -40,6 +42,7 @@
 
 #include <cerrno>
 #include <ctime>
+#include <sys/lock.h>
 #include <unistd.h>
 
 extern "C" int _getentropy(void* buffer, std::size_t length);
@@ -100,6 +103,8 @@ namespace
         std::condition_variable condition;
         std::atomic_bool notification_registered{};
         std::atomic_bool destructor_finished{};
+        std::atomic_bool observer_waiting{};
+        std::atomic_bool notification_observed{};
     };
 
     struct ExitOrderTlsProbe
@@ -204,10 +209,49 @@ namespace
             return false;
         }
 
+        std::recursive_mutex recursive_mutex;
+        recursive_mutex.lock();
+        recursive_mutex.lock();
+        recursive_mutex.unlock();
+        recursive_mutex.unlock();
+
+        std::shared_mutex shared_mutex;
+        shared_mutex.lock_shared();
+        shared_mutex.unlock_shared();
+        shared_mutex.lock();
+        shared_mutex.unlock();
+
+        std::shared_timed_mutex shared_timed_mutex;
+        shared_timed_mutex.lock();
+        bool shared_timed_out{};
+        std::thread shared_waiter{ [&] {
+            shared_timed_out = !shared_timed_mutex.try_lock_shared_for(2ms);
+        } };
+        shared_waiter.join();
+        shared_timed_mutex.unlock();
+        if (!shared_timed_out) {
+            return false;
+        }
+
         std::binary_semaphore semaphore{ 0 };
         std::thread releaser{ [&] { semaphore.release(); } };
         semaphore.acquire();
         releaser.join();
+
+        std::counting_semaphore<4> counting_semaphore{ 0 };
+        counting_semaphore.release(2);
+        counting_semaphore.acquire();
+        counting_semaphore.acquire();
+        if (counting_semaphore.try_acquire() || counting_semaphore.try_acquire_for(2ms)) {
+            return false;
+        }
+
+        std::latch completion{ 2 };
+        std::jthread latch_first{ [&] { completion.count_down(); } };
+        std::jthread latch_second{ [&] { completion.count_down(); } };
+        completion.wait();
+        latch_first.join();
+        latch_second.join();
 
         std::atomic_uint arrivals{};
         std::barrier barrier{ 3 };
@@ -232,6 +276,32 @@ namespace
         });
         std::call_once(outer, [&] { ++once_count; });
 
+        std::once_flag retry_once;
+        unsigned int retry_count{};
+        try {
+            std::call_once(retry_once, [&] {
+                ++retry_count;
+                throw std::runtime_error{ "retry call_once" };
+            });
+            return false;
+        } catch (const std::runtime_error&) {
+        }
+        std::call_once(retry_once, [&] { ++retry_count; });
+
+        std::once_flag contended_once;
+        std::atomic_uint contended_count{};
+        std::array<std::thread, 2U> once_workers;
+        for (auto& worker : once_workers) {
+            worker = std::thread{ [&] {
+                std::call_once(contended_once, [&] {
+                    contended_count.fetch_add(1U, std::memory_order_relaxed);
+                });
+            } };
+        }
+        for (auto& worker : once_workers) {
+            worker.join();
+        }
+
         std::atomic_bool stopped{};
         std::jthread stoppable{ [&](std::stop_token token) {
             while (!token.stop_requested()) {
@@ -242,17 +312,46 @@ namespace
         const bool stop_requested{ stoppable.request_stop() };
         stoppable.join();
 
-        return arrivals.load(std::memory_order_relaxed) == 2U && once_count == 2U && stop_requested &&
-               stopped.load(std::memory_order_acquire) && std::thread::hardware_concurrency() == 1U;
+        std::condition_variable_any interruptible_condition;
+        std::mutex interruptible_mutex;
+        std::binary_semaphore stop_wait_started{ 0 };
+        std::atomic_bool wait_was_stopped{};
+        std::jthread condition_waiter{ [&](std::stop_token token) {
+            std::unique_lock lock{ interruptible_mutex };
+            stop_wait_started.release();
+            wait_was_stopped.store(
+              !interruptible_condition.wait(lock, std::move(token), [] { return false; }),
+              std::memory_order_release);
+        } };
+        stop_wait_started.acquire();
+        std::this_thread::sleep_for(2ms);
+        const bool condition_stop_requested{ condition_waiter.request_stop() };
+        condition_waiter.join();
+
+        return arrivals.load(std::memory_order_relaxed) == 2U && once_count == 2U && retry_count == 2U &&
+               contended_count.load(std::memory_order_relaxed) == 1U && stop_requested &&
+               stopped.load(std::memory_order_acquire) && condition_stop_requested &&
+               wait_was_stopped.load(std::memory_order_acquire) &&
+               std::thread::hardware_concurrency() == 1U;
     }
 
     [[nodiscard]] bool test_atomics_futures_and_exceptions()
     {
         std::atomic<int> value{};
+        std::binary_semaphore atomic_wait_started{ 0 };
+        std::atomic_bool atomic_wait_returned{};
         std::thread waiter{ [&] {
+            atomic_wait_started.release();
             value.wait(0);
+            atomic_wait_returned.store(true, std::memory_order_release);
             value.fetch_add(1, std::memory_order_acq_rel);
         } };
+        atomic_wait_started.acquire();
+        std::this_thread::sleep_for(2ms);
+        if (atomic_wait_returned.load(std::memory_order_acquire)) {
+            waiter.join();
+            return false;
+        }
         value.store(1, std::memory_order_release);
         value.notify_one();
         waiter.join();
@@ -268,6 +367,25 @@ namespace
         if (!wide.compare_exchange_strong(expected, 9U) || wide.load() != 9U) {
             return false;
         }
+
+        std::atomic_flag flag = ATOMIC_FLAG_INIT;
+        static_cast<void>(flag.test_and_set(std::memory_order_release));
+        std::binary_semaphore flag_wait_started{ 0 };
+        std::atomic_bool flag_wait_returned{};
+        std::thread flag_waiter{ [&] {
+            flag_wait_started.release();
+            flag.wait(true, std::memory_order_acquire);
+            flag_wait_returned.store(true, std::memory_order_release);
+        } };
+        flag_wait_started.acquire();
+        std::this_thread::sleep_for(2ms);
+        if (flag_wait_returned.load(std::memory_order_acquire)) {
+            flag_waiter.join();
+            return false;
+        }
+        flag.clear(std::memory_order_release);
+        flag.notify_one();
+        flag_waiter.join();
 
         std::atomic<AtomicRecord> record{ FIRST_RECORD };
         if (record.exchange(SECOND_RECORD) != FIRST_RECORD || record.load() != SECOND_RECORD) {
@@ -287,8 +405,18 @@ namespace
         const int future_value{ future_ready ? future.get() : 0 };
         promise_thread.join();
 
+        std::promise<int> exit_promise;
+        std::future<int> exit_future{ exit_promise.get_future() };
+        std::thread exit_promise_thread{ [promise_at_exit = std::move(exit_promise)]() mutable {
+            promise_at_exit.set_value_at_thread_exit(73);
+        } };
+        exit_promise_thread.join();
+        const bool exit_future_ready{ exit_future.wait_for(100ms) == std::future_status::ready };
+        const int exit_future_value{ exit_future_ready ? exit_future.get() : 0 };
+
         auto asynchronous{ std::async(std::launch::async, [] { return std::make_tuple(1, 2, 3); }) };
-        return future_ready && future_value == 42 && asynchronous.get() == std::make_tuple(1, 2, 3);
+        return future_ready && future_value == 42 && exit_future_ready && exit_future_value == 73 &&
+               asynchronous.get() == std::make_tuple(1, 2, 3);
     }
 
     [[nodiscard]] bool test_tls_and_thread_exit_order()
@@ -322,24 +450,40 @@ namespace
         }
 
         ExitOrderState state;
+        std::thread observer{ [&] {
+            std::unique_lock lock{ state.mutex };
+            state.observer_waiting.store(true, std::memory_order_release);
+            state.condition.wait(lock, [&] {
+                return state.destructor_finished.load(std::memory_order_acquire);
+            });
+            state.notification_observed.store(true, std::memory_order_release);
+        } };
+        while (!state.observer_waiting.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(1ms);
+        }
+        // observer_waiting is published immediately before wait() releases the
+        // mutex. Give the lower-priority observer a scheduling window to enter
+        // the actual condition wait before the exiting thread is created.
+        std::this_thread::sleep_for(2ms);
+
         std::thread exiting_thread{ [&] {
             std::unique_lock lock{ state.mutex };
             exit_order_tls_probe.state = &state;
-            state.notification_registered.store(true, std::memory_order_release);
             std::notify_all_at_thread_exit(state.condition, std::move(lock));
+            state.notification_registered.store(true, std::memory_order_release);
         } };
         while (!state.notification_registered.load(std::memory_order_acquire)) {
             std::this_thread::sleep_for(1ms);
         }
+        bool destructor_preceded_unlock{};
         {
             const std::lock_guard lock{ state.mutex };
-            if (!state.destructor_finished.load(std::memory_order_acquire)) {
-                exiting_thread.join();
-                return false;
-            }
+            destructor_preceded_unlock = state.destructor_finished.load(std::memory_order_acquire);
         }
         exiting_thread.join();
-        return true;
+        observer.join();
+        return destructor_preceded_unlock && state.destructor_finished.load(std::memory_order_acquire) &&
+               state.notification_observed.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] bool test_libc_reentrancy_and_entropy()
@@ -371,12 +515,16 @@ namespace
 
         errno = 0;
         if (_write(STDOUT_FILENO, nullptr, 0) != 0 || _write(STDOUT_FILENO, nullptr, 1) != -1 ||
-            errno != EINVAL) {
+            errno != EFAULT) {
             return false;
         }
 
         std::array<std::byte, 256U> entropy{};
         if (_getentropy(nullptr, 0U) != 0 || _getentropy(entropy.data(), 16U) != 0) {
+            return false;
+        }
+        if (std::ranges::all_of(std::span{ entropy }.first<16U>(),
+                                [&](std::byte value) { return value == entropy.front(); })) {
             return false;
         }
         errno = 0;
@@ -388,9 +536,39 @@ namespace
             return false;
         }
 
+        std::array<_LOCK_T, 32U> newlib_locks{};
+        for (auto& lock : newlib_locks) {
+            __retarget_lock_init(&lock);
+            if (lock == nullptr) {
+                return false;
+            }
+            __retarget_lock_acquire(lock);
+            __retarget_lock_release(lock);
+        }
+        for (auto lock : newlib_locks) {
+            __retarget_lock_close(lock);
+        }
+        // Allocate another wave to verify that closed lock nodes are safely
+        // recycled rather than exhausting a fixed-size pool.
+        for (auto& lock : newlib_locks) {
+            lock = nullptr;
+            __retarget_lock_init_recursive(&lock);
+            if (lock == nullptr) {
+                return false;
+            }
+            __retarget_lock_acquire_recursive(lock);
+            __retarget_lock_release_recursive(lock);
+        }
+        for (auto lock : newlib_locks) {
+            __retarget_lock_close_recursive(lock);
+        }
+
         std::random_device random;
-        static_cast<void>(random());
-        return random.entropy() == std::numeric_limits<std::random_device::result_type>::digits;
+        std::array<std::random_device::result_type, 4U> random_values{};
+        std::ranges::generate(random_values, [&] { return random(); });
+        return random.entropy() == std::numeric_limits<std::random_device::result_type>::digits &&
+               !std::ranges::all_of(random_values,
+                                    [&](auto value) { return value == random_values.front(); });
     }
 
     [[nodiscard]] bool test_many_streams_and_threads()
@@ -487,12 +665,32 @@ namespace
         if (error || fs::file_size(target, error) != CONTENT.size() || error) {
             return false;
         }
+        {
+            std::ifstream renamed{ target, std::ios::binary };
+            std::string input(CONTENT.size(), '\0');
+            renamed.read(input.data(), static_cast<std::streamsize>(input.size()));
+            if (!renamed || input != CONTENT) {
+                return false;
+            }
+        }
 
         std::size_t entries{};
         for ([[maybe_unused]] const auto& entry : fs::recursive_directory_iterator{ root, error }) {
             ++entries;
         }
         if (error || entries != 3U) {
+            return false;
+        }
+
+        const fs::path mixed_case{ nested / "Case-Identity.txt" };
+        const fs::path upper_case{ nested / "CASE-IDENTITY.TXT" };
+        {
+            std::ofstream stream{ mixed_case };
+            stream << "case";
+        }
+        fs::rename(nested / "case-identity.txt", upper_case, error);
+        if (error || !fs::equivalent(upper_case, nested / "case-identity.txt", error) || error ||
+            !fs::remove(upper_case, error) || error) {
             return false;
         }
 
@@ -520,7 +718,21 @@ namespace
         }
 
         const std::uintmax_t removed{ fs::remove_all(root, error) };
-        return !error && removed == 4U && !fs::exists(root, error) && !error;
+        if (error || removed != 4U || fs::exists(root, error) || error) {
+            return false;
+        }
+
+        const fs::path tree{ "/self-move" };
+        const fs::path child{ tree / "child" };
+        if (!fs::create_directories(child, error) || error) {
+            return false;
+        }
+        fs::rename(tree, child / "grandchild", error);
+        const bool rejected_self_move{ error == std::errc::invalid_argument };
+        error.clear();
+        const bool tree_survived{ fs::is_directory(child, error) && !error };
+        static_cast<void>(fs::remove_all(tree, error));
+        return rejected_self_move && tree_survived && !error;
     }
 
     struct NamedTest
