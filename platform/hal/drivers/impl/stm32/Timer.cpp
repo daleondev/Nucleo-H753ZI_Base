@@ -14,6 +14,7 @@ namespace hal
     {
         constexpr std::uint64_t NANOSECONDS_PER_SECOND{ 1'000'000'000ULL };
         constexpr std::uint32_t TIMER_INTERRUPT_PRIORITY{ 5U };
+        constexpr ITimer::Tick MAXIMUM_PRESCALER{ TIM_PSC_PSC };
     }
 
     Timer::Timer(Configuration configuration)
@@ -48,48 +49,84 @@ namespace hal
 
     auto Timer::start() noexcept -> util::Result<>
     {
-        markStateChange();
+        if (!isRunning()) {
+            const auto result{ make_result(HAL_TIM_Base_Start(&m_handle)) };
+            if (!result) {
+                return result;
+            }
+        }
+
         __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
         HAL_NVIC_DisableIRQ(m_interrupt);
         HAL_NVIC_ClearPendingIRQ(m_interrupt);
-        return make_result(HAL_TIM_Base_Start(&m_handle));
+        markStateChange();
+        return {};
     }
 
     auto Timer::stop() noexcept -> util::Result<>
     {
-        markStateChange();
-        const auto result{ make_result(HAL_TIM_Base_Stop(&m_handle)) };
+        const bool restore_update_interrupt{ __HAL_TIM_GET_IT_SOURCE(&m_handle, TIM_IT_UPDATE) != RESET };
+        const bool restore_nvic_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
+
         __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
         HAL_NVIC_DisableIRQ(m_interrupt);
+
+        const auto result{ make_result(HAL_TIM_Base_Stop(&m_handle)) };
+        if (!result) {
+            if (restore_update_interrupt) {
+                __HAL_TIM_ENABLE_IT(&m_handle, TIM_IT_UPDATE);
+            }
+            if (restore_nvic_interrupt) {
+                HAL_NVIC_EnableIRQ(m_interrupt);
+            }
+            return result;
+        }
+
         HAL_NVIC_ClearPendingIRQ(m_interrupt);
-        return result;
+        markStateChange();
+        return {};
     }
 
     auto Timer::startIt() noexcept -> util::Result<>
     {
-        markStateChange();
+        const bool update_interrupt_enabled{ __HAL_TIM_GET_IT_SOURCE(&m_handle, TIM_IT_UPDATE) != RESET };
+        if (isRunning()) {
+            if (!update_interrupt_enabled) {
+                HAL_NVIC_DisableIRQ(m_interrupt);
+                __HAL_TIM_CLEAR_FLAG(&m_handle, TIM_FLAG_UPDATE);
+                HAL_NVIC_ClearPendingIRQ(m_interrupt);
+                __HAL_TIM_ENABLE_IT(&m_handle, TIM_IT_UPDATE);
+            }
+
+            HAL_NVIC_SetPriority(m_interrupt, TIMER_INTERRUPT_PRIORITY, 0U);
+            markStateChange();
+            HAL_NVIC_EnableIRQ(m_interrupt);
+            return {};
+        }
+
+        const bool restore_nvic_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
+        HAL_NVIC_DisableIRQ(m_interrupt);
         __HAL_TIM_CLEAR_FLAG(&m_handle, TIM_FLAG_UPDATE);
         HAL_NVIC_ClearPendingIRQ(m_interrupt);
-        HAL_NVIC_SetPriority(m_interrupt, TIMER_INTERRUPT_PRIORITY, 0U);
-        HAL_NVIC_EnableIRQ(m_interrupt);
 
         const auto result{ make_result(HAL_TIM_Base_Start_IT(&m_handle)) };
         if (!result) {
-            __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
-            HAL_NVIC_DisableIRQ(m_interrupt);
-            HAL_NVIC_ClearPendingIRQ(m_interrupt);
+            if (update_interrupt_enabled) {
+                __HAL_TIM_ENABLE_IT(&m_handle, TIM_IT_UPDATE);
+            }
+            if (restore_nvic_interrupt) {
+                HAL_NVIC_EnableIRQ(m_interrupt);
+            }
+            return result;
         }
-        return result;
+
+        HAL_NVIC_SetPriority(m_interrupt, TIMER_INTERRUPT_PRIORITY, 0U);
+        markStateChange();
+        HAL_NVIC_EnableIRQ(m_interrupt);
+        return {};
     }
 
-    auto Timer::stopIt() noexcept -> util::Result<>
-    {
-        markStateChange();
-        const auto result{ make_result(HAL_TIM_Base_Stop_IT(&m_handle)) };
-        HAL_NVIC_DisableIRQ(m_interrupt);
-        HAL_NVIC_ClearPendingIRQ(m_interrupt);
-        return result;
-    }
+    auto Timer::stopIt() noexcept -> util::Result<> { return stop(); }
 
     auto Timer::getCounter() const noexcept -> Tick
     {
@@ -117,8 +154,37 @@ namespace hal
 
     auto Timer::setPrescaler(Tick value) noexcept -> void
     {
+        // PSC is 16-bit even on TIM2's 32-bit counter. Saturate instead of
+        // allowing the peripheral to silently wrap an out-of-range request.
+        value = std::min(value, MAXIMUM_PRESCALER);
+        const bool restore_update_interrupt{ __HAL_TIM_GET_IT_SOURCE(&m_handle, TIM_IT_UPDATE) != RESET };
+        const bool restore_nvic_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
+
+        HAL_NVIC_DisableIRQ(m_interrupt);
+        __HAL_TIM_DISABLE_IT(&m_handle, TIM_IT_UPDATE);
+        const bool update_was_pending{ __HAL_TIM_GET_FLAG(&m_handle, TIM_FLAG_UPDATE) != RESET };
+        const bool interrupt_was_pending{ NVIC_GetPendingIRQ(m_interrupt) != 0U };
+        const Tick counter{ getCounter() };
+
+        __HAL_TIM_SET_PRESCALER(&m_handle, value);
+        m_handle.Instance->EGR = TIM_EGR_UG;
+        // UG latches the buffered prescaler but also reinitializes CNT. Preserve
+        // the elapsed ticks, matching the Linux timer's setPrescaler semantics.
+        __HAL_TIM_SET_COUNTER(&m_handle, counter);
+
+        if (!update_was_pending) {
+            __HAL_TIM_CLEAR_FLAG(&m_handle, TIM_FLAG_UPDATE);
+        }
+        if (!interrupt_was_pending) {
+            HAL_NVIC_ClearPendingIRQ(m_interrupt);
+        }
+        if (restore_update_interrupt) {
+            __HAL_TIM_ENABLE_IT(&m_handle, TIM_IT_UPDATE);
+        }
         markStateChange();
-        m_handle.Instance->PSC = value;
+        if (restore_nvic_interrupt) {
+            HAL_NVIC_EnableIRQ(m_interrupt);
+        }
     }
 
     auto Timer::forceUpdateEvent() noexcept -> void

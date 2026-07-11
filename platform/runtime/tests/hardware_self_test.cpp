@@ -1,3 +1,5 @@
+#include "hal/drivers/factory/timer.hpp"
+
 #include <algorithm>
 #include <any>
 #include <array>
@@ -48,12 +50,11 @@
 extern "C" int _getentropy(void* buffer, std::size_t length);
 extern "C" int _write(int file, const char* buffer, int length);
 
-extern "C"
-{
-    // These stable values are convenient acceptance points for a debugger or
-    // an automated probe when the serial connection is unavailable.
-    std::uint32_t runtime_hardware_self_test_status{};
-    std::uint32_t runtime_hardware_self_test_phase{};
+extern "C" {
+// These stable values are convenient acceptance points for a debugger or
+// an automated probe when the serial connection is unavailable.
+std::uint32_t runtime_hardware_self_test_status{};
+std::uint32_t runtime_hardware_self_test_phase{};
 }
 
 namespace
@@ -224,9 +225,7 @@ namespace
         std::shared_timed_mutex shared_timed_mutex;
         shared_timed_mutex.lock();
         bool shared_timed_out{};
-        std::thread shared_waiter{ [&] {
-            shared_timed_out = !shared_timed_mutex.try_lock_shared_for(2ms);
-        } };
+        std::thread shared_waiter{ [&] { shared_timed_out = !shared_timed_mutex.try_lock_shared_for(2ms); } };
         shared_waiter.join();
         shared_timed_mutex.unlock();
         if (!shared_timed_out) {
@@ -293,9 +292,8 @@ namespace
         std::array<std::thread, 2U> once_workers;
         for (auto& worker : once_workers) {
             worker = std::thread{ [&] {
-                std::call_once(contended_once, [&] {
-                    contended_count.fetch_add(1U, std::memory_order_relaxed);
-                });
+                std::call_once(contended_once,
+                               [&] { contended_count.fetch_add(1U, std::memory_order_relaxed); });
             } };
         }
         for (auto& worker : once_workers) {
@@ -331,8 +329,7 @@ namespace
         return arrivals.load(std::memory_order_relaxed) == 2U && once_count == 2U && retry_count == 2U &&
                contended_count.load(std::memory_order_relaxed) == 1U && stop_requested &&
                stopped.load(std::memory_order_acquire) && condition_stop_requested &&
-               wait_was_stopped.load(std::memory_order_acquire) &&
-               std::thread::hardware_concurrency() == 1U;
+               wait_was_stopped.load(std::memory_order_acquire) && std::thread::hardware_concurrency() == 1U;
     }
 
     [[nodiscard]] bool test_atomics_futures_and_exceptions()
@@ -445,7 +442,8 @@ namespace
         }
         if (addresses[0] == nullptr || addresses[1] == nullptr || addresses[0] == addresses[1] ||
             addresses[0] == &worker_tls_probe || addresses[1] == &worker_tls_probe ||
-            worker_tls_destructor_count.load(std::memory_order_relaxed) - destructors_before != workers.size()) {
+            worker_tls_destructor_count.load(std::memory_order_relaxed) - destructors_before !=
+              workers.size()) {
             return false;
         }
 
@@ -453,9 +451,8 @@ namespace
         std::thread observer{ [&] {
             std::unique_lock lock{ state.mutex };
             state.observer_waiting.store(true, std::memory_order_release);
-            state.condition.wait(lock, [&] {
-                return state.destructor_finished.load(std::memory_order_acquire);
-            });
+            state.condition.wait(lock,
+                                 [&] { return state.destructor_finished.load(std::memory_order_acquire); });
             state.notification_observed.store(true, std::memory_order_release);
         } };
         while (!state.observer_waiting.load(std::memory_order_acquire)) {
@@ -588,8 +585,7 @@ namespace
             streams[index].open(directory / std::format("{}.txt", index),
                                 std::ios::in | std::ios::out | std::ios::trunc);
             if (!streams[index]) {
-                log("[runtime-self-test] stream stress open failed: %u",
-                    static_cast<unsigned int>(index));
+                log("[runtime-self-test] stream stress open failed: %u", static_cast<unsigned int>(index));
                 return false;
             }
         }
@@ -597,8 +593,7 @@ namespace
             auto& stream{ streams[index] };
             stream.close();
             if (stream.fail()) {
-                log("[runtime-self-test] stream stress close failed: %u",
-                    static_cast<unsigned int>(index));
+                log("[runtime-self-test] stream stress close failed: %u", static_cast<unsigned int>(index));
                 return false;
             }
         }
@@ -617,7 +612,8 @@ namespace
 
         for (std::size_t iteration{}; iteration < 128U; ++iteration) {
             std::thread thread{ [iteration] {
-                const auto allocation{ std::make_unique<std::uint32_t>(static_cast<std::uint32_t>(iteration)) };
+                const auto allocation{ std::make_unique<std::uint32_t>(
+                  static_cast<std::uint32_t>(iteration)) };
                 if (*allocation != iteration) {
                     std::terminate();
                 }
@@ -639,6 +635,72 @@ namespace
         const auto difference{ c_time > chrono_time ? c_time - chrono_time : chrono_time - c_time };
         return std::chrono::steady_clock::is_steady && steady_after - steady_before >= 5ms &&
                system_after > system_before && c_time >= 946'684'800 && difference <= 2;
+    }
+
+    [[nodiscard]] bool test_hardware_timer()
+    {
+        constexpr std::size_t TIMER_INDEX{ 2U };
+        constexpr std::uint32_t TEST_TICK_FREQUENCY_HZ{ 10'000U };
+
+        const auto timer{ hal::timer::create(TIMER_INDEX) };
+        if (timer == nullptr || timer->getInputFrequencyHz() < TEST_TICK_FREQUENCY_HZ) {
+            return false;
+        }
+
+        const auto original_prescaler{ timer->getPrescaler() };
+        const auto original_auto_reload{ timer->getAutoReload() };
+        const auto original_counter{ timer->getCounter() };
+        const bool originally_running{ timer->isRunning() };
+        if (!timer->stop()) {
+            return false;
+        }
+
+        timer->setPrescaler(std::numeric_limits<hal::ITimer::Tick>::max());
+        const bool prescaler_saturated{
+            timer->getPrescaler() == std::numeric_limits<std::uint16_t>::max()
+        };
+        const auto divisor{ timer->getInputFrequencyHz() / TEST_TICK_FREQUENCY_HZ };
+        timer->setPrescaler(divisor - 1U);
+        timer->setAutoReload(std::numeric_limits<hal::ITimer::Tick>::max());
+        timer->setCounter(0U);
+
+        bool passed{ prescaler_saturated &&
+                     timer->getTickFrequencyHz() == TEST_TICK_FREQUENCY_HZ && timer->start() &&
+                     timer->start() };
+        std::this_thread::sleep_for(20ms);
+        const auto measured_ticks{ timer->getCounter() };
+        // At 10 kHz this should be hundreds of ticks. If PSC remained buffered,
+        // the CubeMX 1 MHz setting would advance by tens of thousands instead.
+        passed = passed && measured_ticks > 0U && measured_ticks < TEST_TICK_FREQUENCY_HZ;
+
+        std::atomic_uint callbacks{};
+        timer->setAutoReload(49U);
+        timer->forceUpdateEvent();
+        timer->setPeriodElapsedCallback(
+          [&callbacks]() noexcept { callbacks.fetch_add(1U, std::memory_order_relaxed); });
+        passed = passed && timer->startIt() && timer->startIt();
+
+        const auto callback_deadline{ std::chrono::steady_clock::now() + 100ms };
+        while (callbacks.load(std::memory_order_relaxed) == 0U &&
+               std::chrono::steady_clock::now() < callback_deadline) {
+            std::this_thread::sleep_for(1ms);
+        }
+        passed = passed && callbacks.load(std::memory_order_relaxed) != 0U;
+
+        passed = passed && timer->start();
+        const auto callbacks_before_polling{ callbacks.load(std::memory_order_relaxed) };
+        std::this_thread::sleep_for(20ms);
+        passed = passed && callbacks.load(std::memory_order_relaxed) == callbacks_before_polling;
+
+        timer->clearPeriodElapsedCallback();
+        passed = passed && timer->stop() && timer->stop();
+        timer->setPrescaler(original_prescaler);
+        timer->setAutoReload(original_auto_reload);
+        timer->setCounter(original_counter);
+        if (originally_running) {
+            passed = passed && timer->start();
+        }
+        return passed;
     }
 
     [[nodiscard]] bool test_filex_standard_library()
@@ -762,12 +824,14 @@ namespace
         NamedTest{ "libc reentrancy and entropy", test_libc_reentrancy_and_entropy },
         NamedTest{ "stream and thread stress", test_many_streams_and_threads },
         NamedTest{ "clocks", test_clocks },
+        NamedTest{ "HAL timer", test_hardware_timer },
         NamedTest{ "FileX standard library", test_filex_standard_library },
     };
 
     [[noreturn]] void finish(bool passed, std::size_t phase)
     {
-        runtime_hardware_self_test_status = passed ? PASS_STATUS : FAIL_STATUS | static_cast<std::uint32_t>(phase);
+        runtime_hardware_self_test_status =
+          passed ? PASS_STATUS : FAIL_STATUS | static_cast<std::uint32_t>(phase);
         log(passed ? "[runtime-self-test] PASS" : "[runtime-self-test] FAIL");
         while (true) {
             std::this_thread::sleep_for(1s);

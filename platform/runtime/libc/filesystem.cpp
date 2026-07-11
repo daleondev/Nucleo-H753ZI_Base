@@ -92,14 +92,23 @@ namespace
 #endif
     std::array<char, MAXIMUM_PATH> current_directory{ '/' };
     bool filesystem_initialized{};
+    std::uint32_t rename_backup_sequence{};
     // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
     class RegistryGuard
     {
       public:
         RegistryGuard() noexcept
-          : m_locked{ filesystem_initialized && tx_mutex_get(&registry_mutex, TX_WAIT_FOREVER) == TX_SUCCESS }
         {
+            if (!filesystem_initialized) {
+                m_error = ENODEV;
+                return;
+            }
+            const UINT status{ tx_mutex_get(&registry_mutex, TX_WAIT_FOREVER) };
+            m_locked = status == TX_SUCCESS;
+            if (!m_locked) {
+                m_error = status == TX_WAIT_ABORTED ? EINTR : EIO;
+            }
         }
 
         ~RegistryGuard()
@@ -110,9 +119,11 @@ namespace
         }
 
         [[nodiscard]] explicit operator bool() const noexcept { return m_locked; }
+        [[nodiscard]] auto error() const noexcept -> int { return m_error; }
 
       private:
-        bool m_locked;
+        bool m_locked{};
+        int m_error{};
     };
 
     [[nodiscard]] auto filex_errno(UINT status) noexcept -> int
@@ -342,6 +353,85 @@ namespace
         return 0;
     }
 
+    [[nodiscard]] auto rename_entry_unlocked(bool directory,
+                                             const char* old_path,
+                                             const char* new_path) noexcept -> int
+    {
+        const UINT status{ directory ? fx_directory_rename(&media,
+                                                           const_cast<char*>(old_path),
+                                                           const_cast<char*>(new_path))
+                                     : fx_file_rename(&media,
+                                                      const_cast<char*>(old_path),
+                                                      const_cast<char*>(new_path)) };
+        return filex_errno(status);
+    }
+
+    [[nodiscard]] auto delete_entry_unlocked(bool directory, const char* path) noexcept -> int
+    {
+        return filex_errno(directory ? fx_directory_delete(&media, const_cast<char*>(path))
+                                     : fx_file_delete(&media, const_cast<char*>(path)));
+    }
+
+    [[nodiscard]] auto require_empty_directory_unlocked(const char* path) noexcept -> int
+    {
+        UINT status{ fx_directory_default_set(&media, const_cast<char*>(path)) };
+        int error{ filex_errno(status) };
+        if (error == 0) {
+            char name[MAXIMUM_PATH]{};
+            UINT attributes{};
+            ULONG size{};
+            status = fx_directory_first_full_entry_find(
+              &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+            while (status == FX_SUCCESS &&
+                   (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0)) {
+                status = fx_directory_next_full_entry_find(
+                  &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+            }
+            error = status == FX_NO_MORE_ENTRIES ? 0
+                                                 : status == FX_SUCCESS ? ENOTEMPTY
+                                                                        : filex_errno(status);
+        }
+
+        const int reset_error{
+            filex_errno(fx_directory_default_set(&media, const_cast<char*>("/")))
+        };
+        return error != 0 ? error : reset_error;
+    }
+
+    [[nodiscard]] auto find_rename_backup_unlocked(char (&output)[MAXIMUM_PATH]) noexcept -> int
+    {
+        constexpr std::array<char, 16U> hexadecimal{
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+        };
+        constexpr std::size_t digit_offset{ 4U };
+        constexpr std::size_t digit_count{ 5U };
+        constexpr std::uint32_t sequence_mask{ 0xF'FFFFU };
+
+        // FileX has no replace-existing rename operation. Reserve a short
+        // root entry so the old destination can be restored if the source
+        // rename fails. The registry mutex serializes candidate allocation.
+        for (std::uint32_t attempt{}; attempt < 256U; ++attempt) {
+            constexpr char backup_template[]{ "/FXR00000.TMP" };
+            static_assert(sizeof(backup_template) <= MAXIMUM_PATH);
+            std::memcpy(output, backup_template, sizeof(backup_template));
+            const std::uint32_t sequence{ rename_backup_sequence++ & sequence_mask };
+            for (std::size_t digit{}; digit < digit_count; ++digit) {
+                const std::size_t shift{ (digit_count - digit - 1U) * 4U };
+                output[digit_offset + digit] = hexadecimal[(sequence >> shift) & 0xFU];
+            }
+
+            EntryInformation information{};
+            const int error{ information_unlocked(output, information) };
+            if (error == ENOENT) {
+                return 0;
+            }
+            if (error != 0) {
+                return error;
+            }
+        }
+        return ENOSPC;
+    }
+
     [[nodiscard]] auto switch_mode(FileDescriptor& descriptor, int requested_mode) noexcept -> int
     {
         if (descriptor.open_mode == requested_mode) {
@@ -439,7 +529,7 @@ namespace runtime::filex
             return errno;
         }
         const RegistryGuard guard;
-        return guard ? normalize_path_unlocked(path, output) : EIO;
+        return guard ? normalize_path_unlocked(path, output) : guard.error();
     }
 
     auto information(const char* path, EntryInformation& result) noexcept -> int
@@ -448,7 +538,7 @@ namespace runtime::filex
             return errno;
         }
         const RegistryGuard guard;
-        return guard ? information_unlocked(path, result) : EIO;
+        return guard ? information_unlocked(path, result) : guard.error();
     }
 
     auto availableSpace(std::uint64_t& bytes) noexcept -> int
@@ -458,7 +548,11 @@ namespace runtime::filex
         }
         const RegistryGuard guard;
         ULONG available{};
-        const UINT status{ guard ? fx_media_space_available(&media, &available) : FX_IO_ERROR };
+        if (!guard) {
+            bytes = 0U;
+            return guard.error();
+        }
+        const UINT status{ fx_media_space_available(&media, &available) };
         bytes = available;
         return filex_errno(status);
     }
@@ -470,7 +564,7 @@ namespace runtime::filex
         }
         const RegistryGuard guard;
         if (!guard) {
-            return EIO;
+            return guard.error();
         }
         std::memcpy(output, current_directory.data(), std::strlen(current_directory.data()) + 1U);
         return 0;
@@ -482,6 +576,9 @@ namespace runtime::filex
             return errno;
         }
         const RegistryGuard guard;
+        if (!guard) {
+            return guard.error();
+        }
         char normalized[MAXIMUM_PATH]{};
         EntryInformation info{};
         int error{ normalize_path_unlocked(path, normalized) };
@@ -547,6 +644,10 @@ extern "C" int _open(const char* path, int flags, ...)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     char normalized[MAXIMUM_PATH]{};
     int error{ normalize_path_unlocked(path, normalized) };
     if (error != 0) {
@@ -564,6 +665,10 @@ extern "C" int _open(const char* path, int flags, ...)
 
     EntryInformation info{};
     const int info_error{ information_unlocked(normalized, info) };
+    if (info_error != 0 && info_error != ENOENT) {
+        errno = info_error;
+        return -1;
+    }
     const bool exists{ info_error == 0 };
     if (exists && (info.attributes & FX_DIRECTORY) != 0U) {
         errno = EISDIR;
@@ -619,6 +724,10 @@ extern "C" int _close(int file)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     FileDescriptor* const descriptor{ descriptor_for(file) };
     if (descriptor == nullptr) {
         return -1;
@@ -660,6 +769,10 @@ extern "C" int _read(int file, char* buffer, int length)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     FileDescriptor* const descriptor{ descriptor_for(file) };
     if (descriptor == nullptr || !descriptor->readable) {
         errno = descriptor == nullptr ? errno : EBADF;
@@ -709,6 +822,10 @@ extern "C" int _write(int file, const char* buffer, int length)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     FileDescriptor* const descriptor{ descriptor_for(file) };
     if (descriptor == nullptr || !descriptor->writable) {
         errno = descriptor == nullptr ? errno : EBADF;
@@ -742,6 +859,10 @@ extern "C" off_t _lseek(int file, off_t offset, int origin)
         return static_cast<off_t>(-1);
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return static_cast<off_t>(-1);
+    }
     FileDescriptor* const descriptor{ descriptor_for(file) };
     if (descriptor == nullptr) {
         return static_cast<off_t>(-1);
@@ -817,6 +938,10 @@ extern "C" int _fstat(int file, struct stat* value)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     FileDescriptor* const descriptor{ descriptor_for(file) };
     EntryInformation info{};
     const int error{ descriptor != nullptr ? information_unlocked(descriptor->path.data(), info) : EBADF };
@@ -838,6 +963,10 @@ extern "C" int _stat(const char* path, struct stat* value)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     EntryInformation info{};
     const int error{ information_unlocked(path, info) };
     if (error != 0) {
@@ -866,6 +995,10 @@ extern "C" int _unlink(const char* path)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     char normalized[MAXIMUM_PATH]{};
     EntryInformation info{};
     int error{ normalize_path_unlocked(path, normalized) };
@@ -893,6 +1026,10 @@ extern "C" int _rename(const char* old_path, const char* new_path)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     char old_name[MAXIMUM_PATH]{};
     char new_name[MAXIMUM_PATH]{};
     EntryInformation info{};
@@ -963,10 +1100,27 @@ extern "C" int _rename(const char* old_path, const char* new_path)
                     // a replaced current working directory alive.
                     error = EBUSY;
                 }
+                else if (!destination_is_source &&
+                         std::ranges::any_of(descriptors, [&](const auto& descriptor) {
+                             return descriptor.allocated &&
+                                    path_has_prefix(descriptor.path.data(),
+                                                    new_name,
+                                                    destination_is_directory);
+                         })) {
+                    // FileX has no anonymous file handle with which to keep a
+                    // replaced destination descriptor attached to the old
+                    // object. Refuse replacement instead of silently retargeting
+                    // the descriptor to the source on its next mode switch.
+                    error = EBUSY;
+                }
             }
             else if (destination_error != ENOENT) {
                 error = destination_error;
             }
+        }
+        if (error == 0 && destination_exists && !destination_is_source &&
+            destination_is_directory) {
+            error = require_empty_directory_unlocked(new_name);
         }
 
         if (error == 0 && spelling_changed) {
@@ -983,17 +1137,37 @@ extern "C" int _rename(const char* old_path, const char* new_path)
             }
         }
 
+        char destination_backup[MAXIMUM_PATH]{};
+        bool destination_was_backed_up{};
+        bool source_was_renamed{};
         if (error == 0 && destination_exists && !destination_is_source) {
-            error = filex_errno(destination_is_directory ? fx_directory_delete(&media, new_name)
-                                                         : fx_file_delete(&media, new_name));
+            error = find_rename_backup_unlocked(destination_backup);
+            if (error == 0) {
+                error = rename_entry_unlocked(destination_is_directory, new_name, destination_backup);
+                destination_was_backed_up = error == 0;
+            }
         }
 
         if (error == 0 && spelling_changed) {
-            const UINT status{ source_is_directory ? fx_directory_rename(&media, old_name, new_name)
-                                                   : fx_file_rename(&media, old_name, new_name) };
-            error = filex_errno(status);
+            error = rename_entry_unlocked(source_is_directory, old_name, new_name);
+            source_was_renamed = error == 0;
+            if (error != 0 && destination_was_backed_up) {
+                const int restore_error{
+                    rename_entry_unlocked(destination_is_directory, destination_backup, new_name)
+                };
+                if (restore_error != 0) {
+                    // Both entries still contain their original data, but an
+                    // I/O failure also prevented restoring the destination's
+                    // pathname. Report the restoration failure as the more
+                    // actionable state of the filesystem.
+                    error = restore_error;
+                }
+            }
         }
-        if (error == 0 && spelling_changed) {
+        if (error == 0 && destination_was_backed_up) {
+            error = delete_entry_unlocked(destination_is_directory, destination_backup);
+        }
+        if (source_was_renamed) {
             for (auto& descriptor : descriptors) {
                 if (descriptor.allocated) {
                     migrate_path(descriptor.path, old_name, new_name, include_descendants);
@@ -1024,6 +1198,10 @@ extern "C" int _mkdir(const char* path, mode_t)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     char normalized[MAXIMUM_PATH]{};
     int error{ normalize_path_unlocked(path, normalized) };
     if (error == 0) {
@@ -1042,6 +1220,10 @@ extern "C" int _rmdir(const char* path)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     char normalized[MAXIMUM_PATH]{};
     EntryInformation info{};
     int error{ normalize_path_unlocked(path, normalized) };
@@ -1101,6 +1283,10 @@ extern "C" int _fsync(int file)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     if (descriptor_for(file) == nullptr) {
         return -1;
     }
@@ -1119,6 +1305,10 @@ extern "C" int _ftruncate(int file, off_t length)
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
     FileDescriptor* const descriptor{ descriptor_for(file) };
     if (descriptor == nullptr || !descriptor->writable) {
         errno = descriptor == nullptr ? errno : EBADF;
@@ -1419,6 +1609,10 @@ extern "C" DIR* opendir(const char* path)
         return nullptr;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return nullptr;
+    }
     EntryInformation info{};
     char normalized[MAXIMUM_PATH]{};
     int error{ normalize_path_unlocked(path, normalized) };
@@ -1481,11 +1675,22 @@ extern "C" DIR* opendir(const char* path)
 
 extern "C" dirent* readdir(DIR* directory)
 {
-    if (!usable() || directory == nullptr || !directory->allocated || directory->position < 0) {
+    if (!usable()) {
+        return nullptr;
+    }
+    if (directory == nullptr) {
         errno = EBADF;
         return nullptr;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return nullptr;
+    }
+    if (!directory->allocated || directory->position < 0) {
+        errno = EBADF;
+        return nullptr;
+    }
     if (std::cmp_greater_equal(directory->position, directory->entries.size())) {
         return nullptr;
     }
@@ -1501,27 +1706,89 @@ extern "C" dirent* readdir(DIR* directory)
 
 extern "C" int closedir(DIR* directory)
 {
-    if (!usable() || directory == nullptr || !directory->allocated) {
+    if (!usable()) {
+        return -1;
+    }
+    if (directory == nullptr) {
         errno = EBADF;
         return -1;
     }
     const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
+    if (!directory->allocated) {
+        errno = EBADF;
+        return -1;
+    }
     *directory = runtime_filex_directory_stream{};
     return 0;
 }
 
 extern "C" void rewinddir(DIR* directory)
 {
-    if (directory != nullptr && directory->allocated) {
-        directory->position = 0;
+    if (!usable()) {
+        return;
     }
+    if (directory == nullptr) {
+        errno = EBADF;
+        return;
+    }
+    const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return;
+    }
+    if (!directory->allocated) {
+        errno = EBADF;
+        return;
+    }
+    directory->position = 0;
 }
-extern "C" long telldir(DIR* directory) { return directory != nullptr ? directory->position : -1; }
+extern "C" long telldir(DIR* directory)
+{
+    if (!usable()) {
+        return -1;
+    }
+    if (directory == nullptr) {
+        errno = EBADF;
+        return -1;
+    }
+    const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
+    if (!directory->allocated) {
+        errno = EBADF;
+        return -1;
+    }
+    return directory->position;
+}
 extern "C" void seekdir(DIR* directory, long position)
 {
-    if (directory != nullptr && directory->allocated && position >= 0) {
-        directory->position = position;
+    if (!usable()) {
+        return;
     }
+    if (directory == nullptr) {
+        errno = EBADF;
+        return;
+    }
+    if (position < 0) {
+        errno = EINVAL;
+        return;
+    }
+    const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return;
+    }
+    if (!directory->allocated) {
+        errno = EBADF;
+        return;
+    }
+    directory->position = position;
 }
 extern "C" int dirfd(DIR*)
 {

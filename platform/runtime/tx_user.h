@@ -64,7 +64,8 @@ extern void runtime_tls_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
 #define RUNTIME_THREADX_TLS_USER_EXTENSION                   \
     void* tx_thread_runtime_tls_allocation;                  \
     void* tx_thread_runtime_tls_block;                       \
-    void* tx_thread_runtime_tls_destructors;
+    void* tx_thread_runtime_tls_destructors;                 \
+    void* tx_thread_runtime_emutls;
 
 #define RUNTIME_THREADX_TLS_CREATE(thread_ptr) runtime_tls_thread_create(thread_ptr);
 #define RUNTIME_THREADX_TLS_DELETE(thread_ptr) runtime_tls_thread_delete(thread_ptr);

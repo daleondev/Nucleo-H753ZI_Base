@@ -2,8 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 project(Application LANGUAGES C CXX ASM)
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
-   CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
-    message(FATAL_ERROR "This project requires a GNU C++ compiler with C++26 support (GCC 15+)")
+   CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15 OR
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 17)
+    message(FATAL_ERROR "This project requires GCC 15 or GCC 16")
 endif()
 
 add_library(project_compiler_settings INTERFACE)
@@ -82,7 +83,7 @@ endif()
 add_subdirectory(src)
 
 if(ENABLE_CLANG_TIDY)
-    # LLVM 18 cannot parse GCC 15's C++26 <format> implementation.
+    # Older LLVM releases cannot parse the supported GCC 15/16 C++26 headers.
     find_program(CLANG_TIDY_20_EXECUTABLE NAMES clang-tidy-20 REQUIRED)
     set_target_properties(${PROJECT_NAME} hal hal_drivers runtime_libstdcxx PROPERTIES
         CXX_CLANG_TIDY "${CLANG_TIDY_20_EXECUTABLE}"

@@ -1,6 +1,16 @@
 add_library(runtime_libstdcxx STATIC)
 add_library(runtime::libstdcxx ALIAS runtime_libstdcxx)
 
+if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+    set(RUNTIME_LIBSTDCXX_VENDOR_VERSION gcc-15.2.0)
+else()
+    set(RUNTIME_LIBSTDCXX_VENDOR_VERSION gcc-16.1.0)
+endif()
+
+set(RUNTIME_LIBSTDCXX_VENDOR_DIR
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/${RUNTIME_LIBSTDCXX_VENDOR_VERSION}
+)
+
 target_sources(runtime_libstdcxx
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/atomic.cpp
@@ -21,15 +31,25 @@ target_sources(runtime_libstdcxx
 if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     target_sources(runtime_libstdcxx
         PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/vendor/gcc-15.2.0/c++17/fs_ops.cc
-            ${CMAKE_CURRENT_SOURCE_DIR}/vendor/gcc-15.2.0/c++17/fs_dir.cc
+            ${RUNTIME_LIBSTDCXX_VENDOR_DIR}/c++17/fs_ops.cc
+            ${RUNTIME_LIBSTDCXX_VENDOR_DIR}/c++17/fs_dir.cc
+    )
+endif()
+
+if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+    # GCC 16 moved atomic wait/notify helpers out of the headers. Build the
+    # matching implementation against this runtime's gthreads port: the Arm
+    # archive omits it, while the Linux library's copy uses pthreads directly.
+    target_sources(runtime_libstdcxx
+        PRIVATE
+            ${RUNTIME_LIBSTDCXX_VENDOR_DIR}/c++20/atomic.cc
     )
 endif()
 
 target_include_directories(runtime_libstdcxx
     BEFORE PUBLIC
         ${PROJECT_SOURCE_DIR}/platform/runtime
-        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:${CMAKE_CURRENT_SOURCE_DIR}/vendor/gcc-15.2.0>
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:${RUNTIME_LIBSTDCXX_VENDOR_DIR}>
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 

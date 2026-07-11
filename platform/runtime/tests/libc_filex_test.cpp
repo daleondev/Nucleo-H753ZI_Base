@@ -50,6 +50,11 @@ namespace
             static_cast<void>(_unlink("/seek-overflow.bin"));
             static_cast<void>(_unlink("/rename-source.bin"));
             static_cast<void>(_unlink("/rename-destination.bin"));
+            static_cast<void>(_unlink("/open-rename-source.bin"));
+            static_cast<void>(_unlink("/open-rename-destination.bin"));
+            static_cast<void>(_unlink("/rename-destination-directory/child.bin"));
+            static_cast<void>(_rmdir("/rename-source-directory"));
+            static_cast<void>(_rmdir("/rename-destination-directory"));
             static_cast<void>(_unlink("/case-name.bin"));
             static_cast<void>(_unlink("/mixed-target.bin"));
             static_cast<void>(_unlink("/renamed-cwd/child/relative.bin"));
@@ -222,6 +227,65 @@ TEST_F(FileXTest, RenameReplacesDestinationAndPreservesOpenSourceDescriptor)
     EXPECT_EQ(_stat("/rename-source.bin", &metadata), -1);
     EXPECT_EQ(errno, ENOENT);
     EXPECT_EQ(_stat("/rename-destination.bin", &metadata), 0);
+}
+
+TEST_F(FileXTest, RenameDoesNotRetargetAnOpenDestinationDescriptor)
+{
+    const int source{ _open("/open-rename-source.bin", O_CREAT | O_WRONLY | O_TRUNC, 0666) };
+    ASSERT_GE(source, 3);
+    ASSERT_EQ(_write(source, "source", 6), 6);
+    ASSERT_EQ(_close(source), 0);
+
+    const int destination{
+        _open("/open-rename-destination.bin", O_CREAT | O_RDWR | O_TRUNC, 0666)
+    };
+    ASSERT_GE(destination, 3);
+    ASSERT_EQ(_write(destination, "destination", 11), 11);
+
+    errno = 0;
+    EXPECT_EQ(_rename("/open-rename-source.bin", "/open-rename-destination.bin"), -1);
+    EXPECT_EQ(errno, EBUSY);
+
+    ASSERT_EQ(_lseek(destination, 0, SEEK_SET), 0);
+    std::array<char, 11> destination_contents{};
+    EXPECT_EQ(_read(destination, destination_contents.data(), destination_contents.size()),
+              static_cast<int>(destination_contents.size()));
+    EXPECT_EQ(std::string_view(destination_contents.data(), destination_contents.size()), "destination");
+    EXPECT_EQ(_close(destination), 0);
+
+    struct stat metadata{};
+    EXPECT_EQ(_stat("/open-rename-source.bin", &metadata), 0);
+    EXPECT_EQ(_stat("/open-rename-destination.bin", &metadata), 0);
+}
+
+TEST_F(FileXTest, RenamePreservesANonemptyDestinationDirectoryOnFailure)
+{
+    ASSERT_EQ(_mkdir("/rename-source-directory", 0777), 0);
+    ASSERT_EQ(_mkdir("/rename-destination-directory", 0777), 0);
+    const int child{
+        _open("/rename-destination-directory/child.bin", O_CREAT | O_WRONLY | O_TRUNC, 0666)
+    };
+    ASSERT_GE(child, 3);
+    ASSERT_EQ(_close(child), 0);
+
+    errno = 0;
+    EXPECT_EQ(_rename("/rename-source-directory", "/rename-destination-directory"), -1);
+    EXPECT_EQ(errno, ENOTEMPTY);
+
+    struct stat metadata{};
+    EXPECT_EQ(_stat("/rename-source-directory", &metadata), 0);
+    EXPECT_TRUE(S_ISDIR(metadata.st_mode));
+    EXPECT_EQ(_stat("/rename-destination-directory", &metadata), 0);
+    EXPECT_TRUE(S_ISDIR(metadata.st_mode));
+    EXPECT_EQ(_stat("/rename-destination-directory/child.bin", &metadata), 0);
+
+    ASSERT_EQ(_unlink("/rename-destination-directory/child.bin"), 0);
+    EXPECT_EQ(_rename("/rename-source-directory", "/rename-destination-directory"), 0);
+    errno = 0;
+    EXPECT_EQ(_stat("/rename-source-directory", &metadata), -1);
+    EXPECT_EQ(errno, ENOENT);
+    EXPECT_EQ(_stat("/rename-destination-directory", &metadata), 0);
+    EXPECT_TRUE(S_ISDIR(metadata.st_mode));
 }
 
 TEST_F(FileXTest, RenameMigratesCurrentDirectoryAndRelativePaths)

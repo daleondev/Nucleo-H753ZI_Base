@@ -53,13 +53,17 @@ namespace std _GLIBCXX_VISIBILITY(default)
             return status == 0;
         }
 
-        void _M_release(ptrdiff_t update) noexcept
+        ptrdiff_t _M_release(ptrdiff_t update) noexcept
         {
             while (update-- > 0) {
                 if (runtime::detail::semaphore_post(&m_semaphore) != 0) {
                     std::terminate();
                 }
             }
+            // GCC 16 uses the old value only to assert release's documented
+            // precondition. For every conforming call, zero satisfies that
+            // check; ThreadX does not expose its prior count atomically.
+            return 0;
         }
 
         template<typename Rep, typename Period>
@@ -97,7 +101,12 @@ namespace std _GLIBCXX_VISIBILITY(default)
         runtime::detail::SemaphoreHandle m_semaphore{};
     };
 
+#if _GLIBCXX_RELEASE == 15
     using __semaphore_impl = __threadx_semaphore;
+#elif _GLIBCXX_RELEASE == 16
+    template<ptrdiff_t>
+    using _Semaphore_impl = __threadx_semaphore;
+#endif
 
     _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace std

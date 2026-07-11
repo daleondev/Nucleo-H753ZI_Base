@@ -9,12 +9,15 @@
 #error "The ThreadX libstdc++ adapter is only supported for Arm EABI and Linux builds"
 #endif
 
-#if !defined(_GLIBCXX_RELEASE) || _GLIBCXX_RELEASE != 15
-#error "The ThreadX libstdc++ adapter requires libstdc++ 15"
+#if !defined(_GLIBCXX_RELEASE) || (_GLIBCXX_RELEASE != 15 && _GLIBCXX_RELEASE != 16)
+#error "The ThreadX libstdc++ adapter requires libstdc++ 15 or 16"
 #endif
 
-#if defined(__ARM_EABI__) && (!defined(__GLIBCXX__) || __GLIBCXX__ != 20251203)
-#error "The ThreadX libstdc++ adapter requires Arm GNU Toolchain 15.2.Rel1 (libstdc++ 20251203)"
+#if defined(__ARM_EABI__) &&                                                                    \
+  (!defined(__GLIBCXX__) ||                                                                    \
+   (_GLIBCXX_RELEASE == 15 && __GLIBCXX__ != 20251203) ||                                      \
+   (_GLIBCXX_RELEASE == 16 && __GLIBCXX__ != 20260430))
+#error "The ThreadX libstdc++ adapter requires Arm GNU Toolchain 15.2.Rel1 or GCC 16.1.0"
 #endif
 
 #define __GTHREADS 1

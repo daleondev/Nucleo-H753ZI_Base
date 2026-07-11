@@ -126,7 +126,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 
     const auto green_led{ hal::board::createLed(hal::board::LedId::Green) };
     if (green_led == nullptr) {
-        debug("[input] user button creation failed");
+        debug("[output] green LED creation failed");
         indicate_failure();
     }
 

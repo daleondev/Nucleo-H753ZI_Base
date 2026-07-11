@@ -20,7 +20,7 @@ namespace hal::gpio
 
         struct PinOwner
         {
-            std::weak_ptr<void> instance;
+            bool claimed{};
         };
 
         std::array<PinOwner, PIN_COUNT> owners;
@@ -106,8 +106,9 @@ namespace hal::gpio
             }
 
             const FactoryLock lock{ owners_mutex() };
-            auto& owner{ owners[pin_index(configuration.pin)] };
-            if (!owner.instance.expired()) {
+            const std::size_t index{ pin_index(configuration.pin) };
+            auto& owner{ owners[index] };
+            if (owner.claimed) {
                 return {};
             }
             if constexpr (std::is_same_v<Implementation, GpioInput>) {
@@ -116,8 +117,14 @@ namespace hal::gpio
                     return {};
                 }
             }
-            auto instance{ std::make_shared<Implementation>(configuration) };
-            owner.instance = instance;
+            auto instance{ std::shared_ptr<Implementation>{
+              new Implementation{ configuration },
+              [index](Implementation* implementation) noexcept {
+                  const FactoryLock lock{ owners_mutex() };
+                  delete implementation;
+                  owners[index].claimed = false;
+              } } };
+            owner.claimed = true;
             return instance;
         }
     }

@@ -14,6 +14,18 @@
 #define _GLIBCXX_USE_CHDIR 1
 #define _GLIBCXX_HAVE_SYS_STATVFS_H 1
 
+/* GCC 16's Newlib configuration advertises the *at interfaces, but this
+ * FileX adapter has no directory file descriptors. Keep libstdc++ on its
+ * path-based fallback, as GCC 15 already did for this target. */
+#undef _GLIBCXX_HAVE_OPENAT
+#undef _GLIBCXX_HAVE_UNLINKAT
+
+/* FileX has no ownership or permission model. Do not select libstdc++ paths
+ * that call Newlib's unsupported chmod family. */
+#undef _GLIBCXX_USE_CHMOD
+#undef _GLIBCXX_USE_FCHMOD
+#undef _GLIBCXX_USE_FCHMODAT
+
 /* The project supplies an Arm TLS ABI implementation in tls.cpp. Enable
  * libstdc++'s thread-local call_once trampoline instead of its global-functor
  * fallback, which has known reentrancy limitations. */

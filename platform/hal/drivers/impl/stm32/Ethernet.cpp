@@ -309,9 +309,14 @@ namespace hal
         packet.TxBuffer = &buffer;
         packet.SrcAddrCtrl = ETH_SRC_ADDR_REPLACE;
         packet.CRCPadCtrl = ETH_CRC_PAD_INSERT;
-        return HAL_ETH_Transmit(&m_handle, &packet, timeout_milliseconds(timeout)) == HAL_OK
-                 ? util::Result<>{}
-                 : error_result(std::errc::io_error);
+        switch (HAL_ETH_Transmit(&m_handle, &packet, timeout_milliseconds(timeout))) {
+            case HAL_OK:
+                return {};
+            case HAL_TIMEOUT:
+                return error_result(std::errc::timed_out);
+            default:
+                return error_result(std::errc::io_error);
+        }
     }
 
     auto Ethernet::receive(std::span<std::byte> frame, std::chrono::milliseconds timeout) noexcept
@@ -358,7 +363,7 @@ namespace hal
             if (timeout_ticks == 0U || HAL_GetTick() - started_at >= timeout_ticks) {
                 return error_result<std::size_t>(std::errc::timed_out);
             }
-            tx_thread_relinquish();
+            tx_thread_sleep(1U);
         }
     }
 }
