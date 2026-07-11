@@ -6,9 +6,9 @@ share a source tree with hardware, toolchain, RTOS, or C library adaptation.
 
 ## Ownership
 
-- `startup.cpp` and `tx_user.h` own application-thread startup and the project
-  ThreadX configuration. The runtime is ThreadX-specific, so a nested adapter
-  directory would not add a useful abstraction boundary.
+- `startup.cpp`, `tx_user.h`, and `fx_user.h` own application-thread startup
+  and the project ThreadX/FileX configuration. The runtime is ThreadX-specific,
+  so nested adapter directories would not add useful abstraction boundaries.
 - `libc/` owns Newlib reentrancy and locking, plus the FileX-backed POSIX
   syscall layer. Its `include/` directory contains compatibility headers that
   Newlib does not provide for this target.

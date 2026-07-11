@@ -4,7 +4,7 @@ add_library(runtime::libc ALIAS runtime_libc)
 target_sources(runtime_libc
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/libc.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/filex.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/filesystem.cpp
 )
 
 target_link_libraries(runtime_libc
