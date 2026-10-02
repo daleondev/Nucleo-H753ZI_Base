@@ -1,6 +1,7 @@
 #include "Timer.hpp"
 
 #include "hal/drivers/common.hpp"
+#include "hal/stm32/InterruptGuard.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -259,11 +260,12 @@ namespace hal
 
     auto Timer::setPeriodElapsedCallback(PeriodElapsedCallback callback) noexcept -> void
     {
-        const bool restore_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
-        HAL_NVIC_DisableIRQ(m_interrupt);
-        m_periodElapsedCallback = std::move(callback);
-        if (restore_interrupt) {
-            HAL_NVIC_EnableIRQ(m_interrupt);
+        {
+            // Masking TIM2 alone still allows another task to preempt this
+            // setter. Protect the swap against both tasks and callbacks, then
+            // release the old callback with normal interrupt state restored.
+            const stm32::InterruptGuard interrupt_guard;
+            m_periodElapsedCallback.swap(callback);
         }
     }
 

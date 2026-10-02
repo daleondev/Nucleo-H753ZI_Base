@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RUNTIME_FILEX_SYS_STATVFS_H
+#define RUNTIME_FILEX_SYS_STATVFS_H
 
 #include <sys/types.h>
 
@@ -25,4 +26,6 @@ int statvfs(const char* path, struct statvfs* value);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

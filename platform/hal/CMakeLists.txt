@@ -19,6 +19,13 @@ target_sources(hal
         ${CMAKE_CURRENT_SOURCE_DIR}/${HAL_PLATFORM_DIRECTORY}/hal.cpp
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(hal
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/linux/console.cpp
+    )
+endif()
+
 target_link_libraries(hal
     PUBLIC
         hal::drivers

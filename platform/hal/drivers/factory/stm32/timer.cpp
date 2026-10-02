@@ -21,7 +21,17 @@ namespace hal::timer
             HAL_RCC_GetClockConfig(&clock_configuration, &flash_latency);
 
             std::uint64_t frequency{ HAL_RCC_GetPCLK1Freq() };
-            if (clock_configuration.APB1CLKDivider != RCC_HCLK_DIV1) {
+            if ((RCC->CFGR & RCC_CFGR_TIMPRE) != 0U) {
+                if (clock_configuration.APB1CLKDivider == RCC_HCLK_DIV1 ||
+                    clock_configuration.APB1CLKDivider == RCC_HCLK_DIV2 ||
+                    clock_configuration.APB1CLKDivider == RCC_HCLK_DIV4) {
+                    frequency = HAL_RCC_GetHCLKFreq();
+                }
+                else {
+                    frequency *= 4U;
+                }
+            }
+            else if (clock_configuration.APB1CLKDivider != RCC_HCLK_DIV1) {
                 frequency *= 2U;
             }
             return static_cast<std::uint32_t>(

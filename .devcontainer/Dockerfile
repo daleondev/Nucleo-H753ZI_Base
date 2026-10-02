@@ -1,29 +1,36 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+FROM archlinux:base-devel
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt update && apt install -y --no-install-recommends \
-    software-properties-common \
-    wget \
-    xz-utils \
-    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
-    && apt update && apt install -y --no-install-recommends \
+# Use the same GCC 16 packages as the supported Arch host toolchain. A full
+# upgrade keeps the compilers and their runtime libraries in sync.
+RUN pacman -Syu --needed --noconfirm \
+    arm-none-eabi-gcc \
+    arm-none-eabi-gdb \
+    arm-none-eabi-newlib \
+    clang \
     cmake \
-    ninja-build \
-    gcc-15 \
-    g++-15 \
+    gcc \
     gdb \
-    clang-tidy-20 \
+    git \
+    ninja \
+    openssh \
     openocd \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 100 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 100 \
-    && apt clean \
-    && rm -rf /var/lib/apt/lists/*
+    python \
+    sudo \
+    unzip \
+    && pacman -Scc --noconfirm
 
-RUN wget -qO- https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi.tar.xz | tar -xJ -C /opt
-ENV PATH="/opt/arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi/bin:${PATH}"
+# Fail during image creation if a future repository update changes the major
+# compiler version before the project's runtime port has been updated.
+RUN test "$(gcc -dumpversion | cut -d. -f1)" = 16 \
+    && test "$(arm-none-eabi-gcc -dumpversion | cut -d. -f1)" = 16 \
+    && cmake --version
 
-RUN usermod -aG dialout vscode
+RUN useradd --create-home --uid 1000 --user-group \
+        --groups wheel,uucp,lock --shell /bin/bash vscode \
+    && printf 'vscode ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/vscode \
+    && chmod 0440 /etc/sudoers.d/vscode
+
+ENV LANG=C.UTF-8
 
 WORKDIR /workspace
 

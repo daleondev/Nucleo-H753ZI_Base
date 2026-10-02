@@ -6,7 +6,25 @@ namespace
 {
     [[noreturn]] auto runtime_terminate_handler() noexcept -> void
     {
-        hal::panic("Unhandled C++ exception");
+        const auto exception{ std::current_exception() };
+        if (!exception) {
+            hal::panic("Runtime terminated without an active exception");
+        }
+
+#if defined(__cpp_lib_exception_ptr_cast) && __cpp_lib_exception_ptr_cast >= 202506L
+        if (const auto* error{ std::exception_ptr_cast<std::exception>(exception) }) {
+            hal::panic("Unhandled C++ exception", error->what());
+        }
+        hal::panic("Unhandled non-std C++ exception");
+#else
+        try {
+            std::rethrow_exception(exception);
+        } catch (const std::exception& error) {
+            hal::panic("Unhandled C++ exception", error.what());
+        } catch (...) {
+            hal::panic("Unhandled non-std C++ exception");
+        }
+#endif
     }
 }
 

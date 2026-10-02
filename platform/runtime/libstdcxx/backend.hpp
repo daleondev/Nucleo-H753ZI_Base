@@ -2,13 +2,38 @@
 
 #include <tx_api.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <optional>
+#include <string_view>
 
 namespace runtime
 {
     [[nodiscard]] UINT initialize() noexcept;
+
+    namespace thread
+    {
+        struct Attributes
+        {
+            // Thread name. Automatically generated if empty.
+            std::string_view name{ "" };
+
+            // ThreadX priorities are ordered from 0 (highest) to
+            // TX_MAX_PRIORITIES - 1 (lowest). -1 selects the configured default.
+            std::int32_t priority{ -1 };
+
+            // Stack size in bytes. Zero selects the configured default.
+            std::size_t stack_size{};
+        };
+
+        // Low-level escape hatch for APIs that create a thread internally.
+        // Prefer runtime::thread::create/create_jthread for direct creation.
+        // The attributes apply once to the next standard thread created by the
+        // calling thread; publishing again first replaces them.
+        void publish_attributes(const Attributes& attributes) noexcept;
+
+        [[nodiscard]] std::optional<Attributes> consume_attributes() noexcept;
+    }
 
     namespace detail
     {
@@ -45,7 +70,10 @@ namespace runtime
         [[nodiscard]] UINT initialize_cxx_guard() noexcept;
         void destroy_cxx_guard() noexcept;
 
-        int thread_create(ThreadHandle* thread, void* (*entry)(void*), void* argument) noexcept;
+        int thread_create(ThreadHandle* thread,
+                          void* (*entry)(void*),
+                          void* argument,
+                          const thread::Attributes& attributes) noexcept;
         int thread_join(ThreadHandle thread, void** result) noexcept;
         int thread_detach(ThreadHandle thread) noexcept;
         [[nodiscard]] ThreadHandle thread_self() noexcept;

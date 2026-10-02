@@ -9,15 +9,15 @@
 #error "The ThreadX libstdc++ adapter is only supported for Arm EABI and Linux builds"
 #endif
 
-#if !defined(_GLIBCXX_RELEASE) || (_GLIBCXX_RELEASE != 15 && _GLIBCXX_RELEASE != 16)
-#error "The ThreadX libstdc++ adapter requires libstdc++ 15 or 16"
+#if !defined(_GLIBCXX_RELEASE) || _GLIBCXX_RELEASE != 16
+#error "The ThreadX libstdc++ adapter requires libstdc++ 16"
 #endif
 
-#if defined(__ARM_EABI__) &&                                                                    \
-  (!defined(__GLIBCXX__) ||                                                                    \
-   (_GLIBCXX_RELEASE == 15 && __GLIBCXX__ != 20251203) ||                                      \
-   (_GLIBCXX_RELEASE == 16 && __GLIBCXX__ != 20260430))
-#error "The ThreadX libstdc++ adapter requires Arm GNU Toolchain 15.2.Rel1 or GCC 16.1.0"
+// Accept only the Arm libstdc++ snapshots checked against this adapter.
+// GCC 16.1 and 16.2 share the vendored filesystem and atomic implementations.
+#if defined(__ARM_EABI__) &&                                                                                 \
+  (!defined(__GLIBCXX__) || (__GLIBCXX__ != 20260430 && __GLIBCXX__ != 20260807))
+#error "The ThreadX libstdc++ adapter requires Arm GCC 16.1.0 or GCC 16.2.0"
 #endif
 
 #define __GTHREADS 1
@@ -43,7 +43,7 @@ inline int __gthread_active_p() { return runtime::detail::active() ? 1 : 0; }
 
 inline int __gthread_create(__gthread_t* thread, void* (*entry)(void*), void* argument)
 {
-    return runtime::detail::thread_create(thread, entry, argument);
+    return runtime::detail::thread_create(thread, entry, argument, {});
 }
 
 inline int __gthread_join(__gthread_t thread, void** result)

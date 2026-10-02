@@ -1,4 +1,5 @@
 #include "libc/filesystem.hpp"
+#include "storage_media.hpp"
 
 #include "hal/drivers/factory/rng.hpp"
 #include "hal/drivers/factory/rtc.hpp"
@@ -21,8 +22,8 @@
 #include <ranges>
 #include <sys/stat.h>
 #include <sys/time.h>
-#include <sys/times.h>
 #include <unistd.h>
+#include <utime.h>
 #include <utility>
 #include <vector>
 
@@ -32,7 +33,6 @@
 #include <sys/statvfs.h>
 #endif
 
-extern "C" VOID _fx_ram_driver(FX_MEDIA* media_ptr);
 extern "C" int __io_putchar(int character) __attribute__((weak));
 extern "C" int __io_getchar() __attribute__((weak));
 
@@ -58,33 +58,32 @@ namespace
     using namespace runtime::filex;
 
     constexpr ULONG SECTOR_SIZE{ 512U };
-    constexpr ULONG TOTAL_SECTORS{ 64U };
-    constexpr ULONG SECTORS_PER_CLUSTER{ 4U };
-    constexpr std::size_t RAM_DISK_SIZE{ SECTOR_SIZE * TOTAL_SECTORS };
-    constexpr std::size_t MEDIA_CACHE_SIZE{ SECTOR_SIZE * 2U };
     constexpr int FIRST_FILE_DESCRIPTOR{ 3 };
+
+    struct ResolvedPath
+    {
+        FX_MEDIA* media{};
+        runtime::storage::Volume volume{ runtime::storage::Volume::flash };
+        std::array<char, MAXIMUM_PATH> local{};
+        bool virtual_root{};
+        bool mount_root{};
+    };
 
     struct FileDescriptor
     {
         FX_FILE file{};
+        FX_MEDIA* media{};
         std::array<char, MAXIMUM_PATH> path{};
         std::uint64_t position{};
         bool allocated{};
         bool readable{};
         bool writable{};
         bool append{};
+        bool flush_on_close{};
         int open_mode{ -1 };
     };
 
     // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
-#if defined(HAL_PLATFORM_STM32)
-    [[gnu::section(".filex_ram_disk"), gnu::used]] alignas(32)
-#else
-    alignas(32)
-#endif
-      std::array<UCHAR, RAM_DISK_SIZE> ram_disk_memory{};
-    alignas(32) std::array<UCHAR, MEDIA_CACHE_SIZE> media_cache{};
-    FX_MEDIA media{};
     TX_MUTEX registry_mutex{};
     std::array<FileDescriptor, MAXIMUM_OPEN_FILES> descriptors{};
 #if defined(HAL_PLATFORM_STM32)
@@ -162,6 +161,11 @@ namespace
             default:
                 return EIO;
         }
+    }
+
+    [[nodiscard]] auto flush_media_unlocked(FX_MEDIA* media) noexcept -> int
+    {
+        return media == nullptr ? EIO : filex_errno(fx_media_flush(media));
     }
 
     [[nodiscard]] auto usable() noexcept -> bool
@@ -277,6 +281,49 @@ namespace
         return path_has_prefix(first, second, false);
     }
 
+    [[nodiscard]] constexpr auto mount_name(runtime::storage::Volume volume) noexcept -> const char*
+    {
+        return volume == runtime::storage::Volume::flash ? "/flash" : "/sd";
+    }
+
+    [[nodiscard]] auto resolve_normalized_path(const char* normalized,
+                                               ResolvedPath& result) noexcept -> int
+    {
+        result = {};
+        if (std::strcmp(normalized, "/") == 0) {
+            result.virtual_root = true;
+            std::memcpy(result.local.data(), "/", 2U);
+            return 0;
+        }
+
+        for (const runtime::storage::Volume volume : {
+               runtime::storage::Volume::flash, runtime::storage::Volume::sd }) {
+            const char* const prefix{ mount_name(volume) };
+            if (!path_has_prefix(normalized, prefix, true)) {
+                continue;
+            }
+            if (!runtime::storage::mounted(volume)) {
+                return ENODEV;
+            }
+            result.media = runtime::storage::media(volume);
+            result.volume = volume;
+            const std::size_t prefix_length{ std::strlen(prefix) };
+            result.mount_root = normalized[prefix_length] == '\0';
+            const char* const local{ result.mount_root ? "/" : normalized + prefix_length };
+            std::memcpy(result.local.data(), local, std::strlen(local) + 1U);
+            return 0;
+        }
+        return ENOENT;
+    }
+
+    [[nodiscard]] auto resolve_path_unlocked(const char* path,
+                                             char (&normalized)[MAXIMUM_PATH],
+                                             ResolvedPath& result) noexcept -> int
+    {
+        const int error{ normalize_path_unlocked(path, normalized) };
+        return error == 0 ? resolve_normalized_path(normalized, result) : error;
+    }
+
     [[nodiscard]] auto migrated_path_length(const char* path,
                                             const char* old_prefix,
                                             const char* new_prefix,
@@ -319,6 +366,16 @@ namespace
             return 0;
         }
 
+        ResolvedPath resolved{};
+        const int resolve_error{ resolve_normalized_path(normalized, resolved) };
+        if (resolve_error != 0) {
+            return resolve_error;
+        }
+        if (resolved.mount_root) {
+            result = EntryInformation{ .attributes = FX_DIRECTORY };
+            return 0;
+        }
+
         UINT attributes{};
         ULONG size{};
         UINT year{};
@@ -327,8 +384,8 @@ namespace
         UINT hour{};
         UINT minute{};
         UINT second{};
-        const UINT status{ fx_directory_information_get(&media,
-                                                        normalized,
+        const UINT status{ fx_directory_information_get(resolved.media,
+                                                        resolved.local.data(),
                                                         &attributes,
                                                         &size,
                                                         &year,
@@ -357,35 +414,57 @@ namespace
                                              const char* old_path,
                                              const char* new_path) noexcept -> int
     {
-        const UINT status{ directory ? fx_directory_rename(&media,
-                                                           const_cast<char*>(old_path),
-                                                           const_cast<char*>(new_path))
-                                     : fx_file_rename(&media,
-                                                      const_cast<char*>(old_path),
-                                                      const_cast<char*>(new_path)) };
+        ResolvedPath old_resolved{};
+        ResolvedPath new_resolved{};
+        int error{ resolve_normalized_path(old_path, old_resolved) };
+        if (error == 0) {
+            error = resolve_normalized_path(new_path, new_resolved);
+        }
+        if (error != 0) {
+            return error;
+        }
+        if (old_resolved.media != new_resolved.media) {
+            return EXDEV;
+        }
+        const UINT status{ directory ? fx_directory_rename(old_resolved.media,
+                                                           old_resolved.local.data(),
+                                                           new_resolved.local.data())
+                                     : fx_file_rename(old_resolved.media,
+                                                      old_resolved.local.data(),
+                                                      new_resolved.local.data()) };
         return filex_errno(status);
     }
 
     [[nodiscard]] auto delete_entry_unlocked(bool directory, const char* path) noexcept -> int
     {
-        return filex_errno(directory ? fx_directory_delete(&media, const_cast<char*>(path))
-                                     : fx_file_delete(&media, const_cast<char*>(path)));
+        ResolvedPath resolved{};
+        const int error{ resolve_normalized_path(path, resolved) };
+        if (error != 0) {
+            return error;
+        }
+        return filex_errno(directory ? fx_directory_delete(resolved.media, resolved.local.data())
+                                     : fx_file_delete(resolved.media, resolved.local.data()));
     }
 
     [[nodiscard]] auto require_empty_directory_unlocked(const char* path) noexcept -> int
     {
-        UINT status{ fx_directory_default_set(&media, const_cast<char*>(path)) };
+        ResolvedPath resolved{};
+        const int resolve_error{ resolve_normalized_path(path, resolved) };
+        if (resolve_error != 0) {
+            return resolve_error;
+        }
+        UINT status{ fx_directory_default_set(resolved.media, resolved.local.data()) };
         int error{ filex_errno(status) };
         if (error == 0) {
             char name[MAXIMUM_PATH]{};
             UINT attributes{};
             ULONG size{};
             status = fx_directory_first_full_entry_find(
-              &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+              resolved.media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
             while (status == FX_SUCCESS &&
                    (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0)) {
                 status = fx_directory_next_full_entry_find(
-                  &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+                  resolved.media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
             }
             error = status == FX_NO_MORE_ENTRIES ? 0
                                                  : status == FX_SUCCESS ? ENOTEMPTY
@@ -393,17 +472,17 @@ namespace
         }
 
         const int reset_error{
-            filex_errno(fx_directory_default_set(&media, const_cast<char*>("/")))
+            filex_errno(fx_directory_default_set(resolved.media, const_cast<char*>("/")))
         };
         return error != 0 ? error : reset_error;
     }
 
-    [[nodiscard]] auto find_rename_backup_unlocked(char (&output)[MAXIMUM_PATH]) noexcept -> int
+    [[nodiscard]] auto find_rename_backup_unlocked(runtime::storage::Volume volume,
+                                                   char (&output)[MAXIMUM_PATH]) noexcept -> int
     {
         constexpr std::array<char, 16U> hexadecimal{
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
         };
-        constexpr std::size_t digit_offset{ 4U };
         constexpr std::size_t digit_count{ 5U };
         constexpr std::uint32_t sequence_mask{ 0xF'FFFFU };
 
@@ -411,9 +490,13 @@ namespace
         // root entry so the old destination can be restored if the source
         // rename fails. The registry mutex serializes candidate allocation.
         for (std::uint32_t attempt{}; attempt < 256U; ++attempt) {
-            constexpr char backup_template[]{ "/FXR00000.TMP" };
-            static_assert(sizeof(backup_template) <= MAXIMUM_PATH);
-            std::memcpy(output, backup_template, sizeof(backup_template));
+            const char* const prefix{ mount_name(volume) };
+            const std::size_t prefix_length{ std::strlen(prefix) };
+            constexpr char backup_suffix[]{ "/FXR00000.TMP" };
+            static_assert(sizeof(backup_suffix) + sizeof("/flash") <= MAXIMUM_PATH);
+            std::memcpy(output, prefix, prefix_length);
+            std::memcpy(output + prefix_length, backup_suffix, sizeof(backup_suffix));
+            const std::size_t digit_offset{ prefix_length + 4U };
             const std::uint32_t sequence{ rename_backup_sequence++ & sequence_mask };
             for (std::size_t digit{}; digit < digit_count; ++digit) {
                 const std::size_t shift{ (digit_count - digit - 1U) * 4U };
@@ -438,7 +521,6 @@ namespace
             return 0;
         }
         if (descriptor.open_mode >= 0) {
-            descriptor.position = descriptor.file.fx_file_current_file_offset;
             const UINT close_status{ fx_file_close(&descriptor.file) };
             descriptor.open_mode = -1;
             if (close_status != FX_SUCCESS) {
@@ -446,7 +528,28 @@ namespace
             }
         }
         std::memset(&descriptor.file, 0, sizeof(descriptor.file));
-        const UINT open_status{ fx_file_open(&media, &descriptor.file, descriptor.path.data(), requested_mode) };
+        ResolvedPath resolved{};
+        const int resolve_error{ resolve_normalized_path(descriptor.path.data(), resolved) };
+        if (resolve_error != 0 || resolved.virtual_root || resolved.mount_root) {
+            return resolve_error != 0 ? resolve_error : EISDIR;
+        }
+        if (requested_mode == FX_OPEN_FOR_READ &&
+            std::ranges::any_of(descriptors, [&](const auto& candidate) {
+                return candidate.allocated && candidate.open_mode == FX_OPEN_FOR_WRITE &&
+                       paths_equal(candidate.path.data(), descriptor.path.data());
+            })) {
+            // FileX opens from the cached directory entry, which can still
+            // describe the file before another handle's completed writes.
+            // Publish that writer's size and cluster chain before opening a
+            // new reader; changing stat alone would leave reads at stale EOF.
+            const int flush_error{ flush_media_unlocked(resolved.media) };
+            if (flush_error != 0) {
+                return flush_error;
+            }
+        }
+        const UINT open_status{
+            fx_file_open(resolved.media, &descriptor.file, resolved.local.data(), requested_mode)
+        };
         if (open_status != FX_SUCCESS) {
             return filex_errno(open_status);
         }
@@ -455,10 +558,31 @@ namespace
         return filex_errno(seek_status);
     }
 
+    [[nodiscard]] auto extend_with_zeroes(FX_FILE& file, std::uint64_t size) noexcept -> int
+    {
+        // FileX clamps seeks to EOF and does not provide sparse files. Keep
+        // the POSIX offset separately and materialize a gap only on a write.
+        if (size <= file.fx_file_current_file_size) {
+            return 0;
+        }
+        int error{ filex_errno(fx_file_extended_seek(&file, file.fx_file_current_file_size)) };
+        constexpr std::array<std::byte, SECTOR_SIZE> zeroes{};
+        while (error == 0 && file.fx_file_current_file_size < size) {
+            const ULONG chunk{ static_cast<ULONG>(
+              std::min<std::uint64_t>(size - file.fx_file_current_file_size, zeroes.size())) };
+            error = filex_errno(fx_file_write(&file, const_cast<std::byte*>(zeroes.data()), chunk));
+        }
+        return error;
+    }
+
     [[nodiscard]] auto descriptor_for(int file) noexcept -> FileDescriptor*
     {
+        if (file < FIRST_FILE_DESCRIPTOR) {
+            errno = EBADF;
+            return nullptr;
+        }
         const int index{ file - FIRST_FILE_DESCRIPTOR };
-        if (index < 0 || std::cmp_greater_equal(index, descriptors.size()) || !descriptors[index].allocated) {
+        if (std::cmp_greater_equal(index, descriptors.size()) || !descriptors[index].allocated) {
             errno = EBADF;
             return nullptr;
         }
@@ -543,16 +667,28 @@ namespace runtime::filex
 
     auto availableSpace(std::uint64_t& bytes) noexcept -> int
     {
+        return availableSpace("/flash", bytes);
+    }
+
+    auto availableSpace(const char* path, std::uint64_t& bytes) noexcept -> int
+    {
         if (!usable()) {
             return errno;
         }
         const RegistryGuard guard;
-        ULONG available{};
+        ULONG64 available{};
         if (!guard) {
             bytes = 0U;
             return guard.error();
         }
-        const UINT status{ fx_media_space_available(&media, &available) };
+        char normalized[MAXIMUM_PATH]{};
+        ResolvedPath resolved{};
+        const int resolve_error{ resolve_path_unlocked(path, normalized, resolved) };
+        if (resolve_error != 0 || resolved.virtual_root) {
+            bytes = 0U;
+            return resolve_error != 0 ? resolve_error : EINVAL;
+        }
+        const UINT status{ fx_media_extended_space_available(resolved.media, &available) };
         bytes = available;
         return filex_errno(status);
     }
@@ -606,40 +742,25 @@ extern "C" void runtime_filex_initialize()
         TX_SUCCESS) {
         Error_Handler();
     }
-    const UINT format_status{ fx_media_format(&media,
-                                              _fx_ram_driver,
-                                              ram_disk_memory.data(),
-                                              media_cache.data(),
-                                              static_cast<ULONG>(media_cache.size()),
-                                              const_cast<CHAR*>("RAM DISK"),
-                                              1U,
-                                              32U,
-                                              0U,
-                                              TOTAL_SECTORS,
-                                              SECTOR_SIZE,
-                                              SECTORS_PER_CLUSTER,
-                                              1U,
-                                              1U) };
-    if (format_status != FX_SUCCESS) {
-        Error_Handler();
-    }
-    const UINT open_status{ fx_media_open(&media,
-                                          const_cast<CHAR*>("RAM DISK"),
-                                          _fx_ram_driver,
-                                          ram_disk_memory.data(),
-                                          media_cache.data(),
-                                          static_cast<ULONG>(media_cache.size())) };
-    if (open_status != FX_SUCCESS) {
+    if (!runtime::storage::initialize()) {
         Error_Handler();
     }
     current_directory.fill('\0');
-    current_directory[0] = '/';
+    const char* const initial_directory{
+        runtime::storage::mounted(runtime::storage::Volume::flash) ? "/flash" : "/sd"
+    };
+    std::memcpy(current_directory.data(), initial_directory, std::strlen(initial_directory) + 1U);
     filesystem_initialized = true;
 }
 
 #if defined(HAL_PLATFORM_STM32) || defined(HAL_PLATFORM_LINUX)
 extern "C" int _open(const char* path, int flags, ...)
 {
+    if ((flags & O_ACCMODE) != O_RDONLY && (flags & O_ACCMODE) != O_WRONLY &&
+        (flags & O_ACCMODE) != O_RDWR) {
+        errno = EINVAL;
+        return -1;
+    }
     if (!usable()) {
         return -1;
     }
@@ -649,9 +770,14 @@ extern "C" int _open(const char* path, int flags, ...)
         return -1;
     }
     char normalized[MAXIMUM_PATH]{};
-    int error{ normalize_path_unlocked(path, normalized) };
+    ResolvedPath resolved{};
+    int error{ resolve_path_unlocked(path, normalized, resolved) };
     if (error != 0) {
         errno = error;
+        return -1;
+    }
+    if (resolved.virtual_root || resolved.mount_root) {
+        errno = EISDIR;
         return -1;
     }
 
@@ -683,7 +809,7 @@ extern "C" int _open(const char* path, int flags, ...)
         return -1;
     }
     if (!exists) {
-        const UINT create_status{ fx_file_create(&media, normalized) };
+        const UINT create_status{ fx_file_create(resolved.media, resolved.local.data()) };
         if (create_status != FX_SUCCESS) {
             errno = filex_errno(create_status);
             return -1;
@@ -692,10 +818,12 @@ extern "C" int _open(const char* path, int flags, ...)
     }
 
     *slot = FileDescriptor{};
+    slot->media = resolved.media;
     slot->allocated = true;
     slot->readable = (flags & O_ACCMODE) != O_WRONLY;
     slot->writable = (flags & O_ACCMODE) != O_RDONLY;
     slot->append = (flags & O_APPEND) != 0;
+    slot->flush_on_close = !exists || slot->writable;
     std::memcpy(slot->path.data(), normalized, std::strlen(normalized) + 1U);
     slot->position = slot->append ? info.size : 0U;
     const int initial_mode{ slot->writable ? FX_OPEN_FOR_WRITE : FX_OPEN_FOR_READ };
@@ -732,10 +860,19 @@ extern "C" int _close(int file)
     if (descriptor == nullptr) {
         return -1;
     }
+    const bool flush_on_close{ descriptor->flush_on_close };
+    FX_MEDIA* const media{ descriptor->media };
     const UINT status{ descriptor->open_mode >= 0 ? fx_file_close(&descriptor->file) : FX_SUCCESS };
+    int error{ filex_errno(status) };
+    if (error == 0 && flush_on_close) {
+        // FileX file close updates directory metadata in its RAM cache, but it
+        // does not make that cache durable. Flush before releasing the POSIX
+        // descriptor so fclose/ofstream::close survives an immediate reset.
+        error = flush_media_unlocked(media);
+    }
     *descriptor = FileDescriptor{};
-    if (status != FX_SUCCESS) {
-        errno = filex_errno(status);
+    if (error != 0) {
+        errno = error;
         return -1;
     }
     return 0;
@@ -762,6 +899,9 @@ extern "C" int _read(int file, char* buffer, int length)
                 return index == 0 ? -1 : index;
             }
             buffer[index] = static_cast<char>(character);
+            if (character == '\n') {
+                return index + 1;
+            }
         }
         return length;
     }
@@ -781,7 +921,15 @@ extern "C" int _read(int file, char* buffer, int length)
     if (length == 0) {
         return 0;
     }
-    const int mode_error{ switch_mode(*descriptor, FX_OPEN_FOR_READ) };
+    int mode_error{ switch_mode(*descriptor, FX_OPEN_FOR_READ) };
+    if (mode_error == 0 && descriptor->position >= descriptor->file.fx_file_current_file_size) {
+        // Reading EOF must not replace a seek beyond EOF with FileX's
+        // clamped physical offset.
+        return 0;
+    }
+    if (mode_error == 0) {
+        mode_error = filex_errno(fx_file_extended_seek(&descriptor->file, descriptor->position));
+    }
     if (mode_error != 0) {
         errno = mode_error;
         return -1;
@@ -837,6 +985,11 @@ extern "C" int _write(int file, const char* buffer, int length)
     int error{ switch_mode(*descriptor, FX_OPEN_FOR_WRITE) };
     if (error == 0 && descriptor->append) {
         descriptor->position = descriptor->file.fx_file_current_file_size;
+    }
+    if (error == 0) {
+        error = extend_with_zeroes(descriptor->file, descriptor->position);
+    }
+    if (error == 0) {
         error = filex_errno(fx_file_extended_seek(&descriptor->file, descriptor->position));
     }
     if (error != 0) {
@@ -982,6 +1135,12 @@ extern "C" int _stat(const char* path, struct stat* value)
     for (const auto& descriptor : descriptors) {
         if (descriptor.allocated && descriptor.open_mode >= 0 &&
             paths_equal(descriptor.path.data(), normalized)) {
+            if (descriptor.open_mode == FX_OPEN_FOR_WRITE) {
+                // The writer is authoritative after both growth and shrink.
+                // A reader may have opened against older directory metadata.
+                info.size = descriptor.file.fx_file_current_file_size;
+                break;
+            }
             info.size = std::max<std::uint64_t>(info.size, descriptor.file.fx_file_current_file_size);
         }
     }
@@ -1000,8 +1159,9 @@ extern "C" int _unlink(const char* path)
         return -1;
     }
     char normalized[MAXIMUM_PATH]{};
+    ResolvedPath resolved{};
     EntryInformation info{};
-    int error{ normalize_path_unlocked(path, normalized) };
+    int error{ resolve_path_unlocked(path, normalized, resolved) };
     if (error == 0) {
         error = information_unlocked(normalized, info);
     }
@@ -1010,8 +1170,13 @@ extern "C" int _unlink(const char* path)
             error = EISDIR;
         }
         else {
-            error = filex_errno(fx_file_delete(&media, normalized));
+            error = resolved.virtual_root || resolved.mount_root
+                      ? EBUSY
+                      : filex_errno(fx_file_delete(resolved.media, resolved.local.data()));
         }
+    }
+    if (error == 0) {
+        error = flush_media_unlocked(resolved.media);
     }
     if (error != 0) {
         errno = error;
@@ -1032,16 +1197,22 @@ extern "C" int _rename(const char* old_path, const char* new_path)
     }
     char old_name[MAXIMUM_PATH]{};
     char new_name[MAXIMUM_PATH]{};
+    ResolvedPath old_resolved{};
+    ResolvedPath new_resolved{};
     EntryInformation info{};
-    int error{ normalize_path_unlocked(old_path, old_name) };
+    int error{ resolve_path_unlocked(old_path, old_name, old_resolved) };
     if (error == 0) {
-        error = normalize_path_unlocked(new_path, new_name);
+        error = resolve_path_unlocked(new_path, new_name, new_resolved);
     }
     if (error == 0) {
         error = information_unlocked(old_name, info);
     }
-    if (error == 0 && (std::strcmp(old_name, "/") == 0 || std::strcmp(new_name, "/") == 0)) {
+    if (error == 0 && (old_resolved.virtual_root || old_resolved.mount_root ||
+                       new_resolved.virtual_root || new_resolved.mount_root)) {
         error = EBUSY;
+    }
+    if (error == 0 && old_resolved.media != new_resolved.media) {
+        error = EXDEV;
     }
     if (error == 0) {
         const bool source_is_directory{ (info.attributes & FX_DIRECTORY) != 0U };
@@ -1133,7 +1304,7 @@ extern "C" int _rename(const char* old_path, const char* new_path)
                 // updates open handles. Flush modified source handles first or
                 // a later mode switch can reopen a stale size/cluster entry as
                 // FX_FILE_CORRUPT.
-                error = filex_errno(fx_media_flush(&media));
+                error = filex_errno(fx_media_flush(old_resolved.media));
             }
         }
 
@@ -1141,7 +1312,7 @@ extern "C" int _rename(const char* old_path, const char* new_path)
         bool destination_was_backed_up{};
         bool source_was_renamed{};
         if (error == 0 && destination_exists && !destination_is_source) {
-            error = find_rename_backup_unlocked(destination_backup);
+            error = find_rename_backup_unlocked(old_resolved.volume, destination_backup);
             if (error == 0) {
                 error = rename_entry_unlocked(destination_is_directory, new_name, destination_backup);
                 destination_was_backed_up = error == 0;
@@ -1184,6 +1355,9 @@ extern "C" int _rename(const char* old_path, const char* new_path)
 #endif
             }
         }
+        if (error == 0 && spelling_changed) {
+            error = flush_media_unlocked(old_resolved.media);
+        }
     }
     if (error != 0) {
         errno = error;
@@ -1203,9 +1377,15 @@ extern "C" int _mkdir(const char* path, mode_t)
         return -1;
     }
     char normalized[MAXIMUM_PATH]{};
-    int error{ normalize_path_unlocked(path, normalized) };
+    ResolvedPath resolved{};
+    int error{ resolve_path_unlocked(path, normalized, resolved) };
     if (error == 0) {
-        error = filex_errno(fx_directory_create(&media, normalized));
+        error = resolved.virtual_root || resolved.mount_root
+                  ? EEXIST
+                  : filex_errno(fx_directory_create(resolved.media, resolved.local.data()));
+    }
+    if (error == 0) {
+        error = flush_media_unlocked(resolved.media);
     }
     if (error != 0) {
         errno = error;
@@ -1225,8 +1405,9 @@ extern "C" int _rmdir(const char* path)
         return -1;
     }
     char normalized[MAXIMUM_PATH]{};
+    ResolvedPath resolved{};
     EntryInformation info{};
-    int error{ normalize_path_unlocked(path, normalized) };
+    int error{ resolve_path_unlocked(path, normalized, resolved) };
     if (error == 0) {
         error = information_unlocked(normalized, info);
     }
@@ -1234,14 +1415,20 @@ extern "C" int _rmdir(const char* path)
         if ((info.attributes & FX_DIRECTORY) == 0U) {
             error = ENOTDIR;
         }
+        else if (resolved.virtual_root || resolved.mount_root) {
+            error = EBUSY;
+        }
         else if (path_has_prefix(current_directory.data(), normalized, true)) {
             // FileX does not track a process working directory. Removing it
             // here would leave the adapter's current_directory dangling.
             error = EBUSY;
         }
         else {
-            error = filex_errno(fx_directory_delete(&media, normalized));
+            error = filex_errno(fx_directory_delete(resolved.media, resolved.local.data()));
         }
+    }
+    if (error == 0) {
+        error = flush_media_unlocked(resolved.media);
     }
     if (error != 0) {
         errno = error;
@@ -1287,10 +1474,17 @@ extern "C" int _fsync(int file)
         errno = guard.error();
         return -1;
     }
-    if (descriptor_for(file) == nullptr) {
+    FileDescriptor* const descriptor{ descriptor_for(file) };
+    if (descriptor == nullptr) {
         return -1;
     }
-    const UINT status{ fx_media_flush(&media) };
+    ResolvedPath resolved{};
+    const int resolve_error{ resolve_normalized_path(descriptor->path.data(), resolved) };
+    if (resolve_error != 0) {
+        errno = resolve_error;
+        return -1;
+    }
+    const UINT status{ fx_media_flush(resolved.media) };
     if (status != FX_SUCCESS) {
         errno = filex_errno(status);
         return -1;
@@ -1322,22 +1516,14 @@ extern "C" int _ftruncate(int file, off_t length)
               fx_file_extended_truncate_release(&descriptor->file, static_cast<ULONG64>(length)));
         }
         else if (std::cmp_greater(length, original_size)) {
-            error = filex_errno(fx_file_extended_seek(&descriptor->file, original_size));
-            constexpr std::array<std::byte, 64U> zeroes{};
-            std::uint64_t remaining{ static_cast<std::uint64_t>(length) - original_size };
-            while (error == 0 && remaining > 0U) {
-                const ULONG chunk{ static_cast<ULONG>(std::min<std::uint64_t>(remaining, zeroes.size())) };
-                error = filex_errno(
-                  fx_file_write(&descriptor->file, const_cast<std::byte*>(zeroes.data()), chunk));
-                remaining -= error == 0 ? chunk : 0U;
-            }
+            error = extend_with_zeroes(descriptor->file, static_cast<std::uint64_t>(length));
         }
     }
     if (error != 0) {
         errno = error;
         return -1;
     }
-    descriptor->position = std::min<std::uint64_t>(descriptor->position, static_cast<std::uint64_t>(length));
+    // ftruncate changes the file size, never the descriptor's offset.
     const int seek_error{ filex_errno(fx_file_extended_seek(&descriptor->file, descriptor->position)) };
     if (seek_error != 0) {
         errno = seek_error;
@@ -1353,10 +1539,92 @@ extern "C" int _truncate(const char* path, off_t length)
         return -1;
     }
     const int result{ _ftruncate(descriptor, length) };
+    if (result == 0) {
+        return _close(descriptor);
+    }
     const int saved_errno{ errno };
     static_cast<void>(_close(descriptor));
     errno = saved_errno;
-    return result;
+    return -1;
+}
+
+extern "C" int _utime(const char* path, const struct utimbuf* times)
+{
+    if (!usable()) {
+        return -1;
+    }
+    const RegistryGuard guard;
+    if (!guard) {
+        errno = guard.error();
+        return -1;
+    }
+    char normalized[MAXIMUM_PATH]{};
+    ResolvedPath resolved{};
+    int error{ resolve_path_unlocked(path, normalized, resolved) };
+    if (error == 0 && (resolved.virtual_root || resolved.mount_root)) {
+        // FAT volume roots and our virtual root have no writable directory entry.
+        error = EROFS;
+    }
+    EntryInformation information{};
+    if (error == 0) {
+        error = information_unlocked(normalized, information);
+    }
+    if (error != 0) {
+        errno = error;
+        return -1;
+    }
+
+    using namespace std::chrono;
+    const sys_seconds timestamp{ times == nullptr ? floor<seconds>(system_clock::now())
+                                                  : sys_seconds{ seconds{ times->modtime } } };
+    // Validate before converting to year_month_day: arbitrary time_t values
+    // can exceed chrono::year's range as well as FAT's 1980..2107 range.
+    if (timestamp < sys_days{ year{ 1980 } / January / 1 } ||
+        timestamp >= sys_days{ year{ 2108 } / January / 1 }) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    const sys_days date{ floor<days>(timestamp) };
+    const year_month_day calendar{ date };
+    const hh_mm_ss time{ timestamp - date };
+    const auto year_value{ static_cast<UINT>(static_cast<int>(calendar.year())) };
+    const auto month_value{ static_cast<UINT>(static_cast<unsigned>(calendar.month())) };
+    const auto day_value{ static_cast<UINT>(static_cast<unsigned>(calendar.day())) };
+    const auto hour_value{ static_cast<UINT>(time.hours().count()) };
+    const auto minute_value{ static_cast<UINT>(time.minutes().count()) };
+    const auto second_value{ static_cast<UINT>(time.seconds().count()) };
+
+    // A dirty writer would otherwise replace the requested timestamp with
+    // FileX's current time on the next flush/close. Commit pending writes first.
+    error = flush_media_unlocked(resolved.media);
+    if (error == 0) {
+        error = filex_errno(fx_file_date_time_set(resolved.media,
+                                                  resolved.local.data(),
+                                                  year_value,
+                                                  month_value,
+                                                  day_value,
+                                                  hour_value,
+                                                  minute_value,
+                                                  second_value));
+    }
+    if (error == 0) {
+        // Keep open handles consistent with the directory entry. A later write
+        // may update mtime normally, but merely closing must preserve this value.
+        for (auto& descriptor : descriptors) {
+            if (descriptor.allocated && descriptor.open_mode >= 0 &&
+                paths_equal(descriptor.path.data(), normalized)) {
+                auto& entry{ descriptor.file.fx_file_dir_entry };
+                entry.fx_dir_entry_date = ((year_value - 1980U) << 9U) | (month_value << 5U) | day_value;
+                entry.fx_dir_entry_time = (hour_value << 11U) | (minute_value << 5U) | (second_value / 2U);
+            }
+        }
+        error = flush_media_unlocked(resolved.media);
+    }
+    if (error != 0) {
+        errno = error;
+        return -1;
+    }
+    return 0;
 }
 
 extern "C" int _gettimeofday(struct timeval* value, void*)
@@ -1468,6 +1736,7 @@ extern "C" int chdir(const char* path) { return _chdir(path); }
 extern "C" int truncate(const char* path, off_t length) { return _truncate(path, length); }
 extern "C" int ftruncate(int file, off_t length) { return _ftruncate(file, length); }
 extern "C" int fsync(int file) { return _fsync(file); }
+extern "C" int utime(const char* path, const struct utimbuf* times) { return _utime(path, times); }
 
 extern "C" char* getcwd(char* buffer, std::size_t size)
 {
@@ -1512,7 +1781,9 @@ extern "C" int statvfs(const char* path, struct statvfs* value)
     EntryInformation information{};
     const int path_error{ runtime::filex::information(path, information) };
     std::uint64_t available{};
-    const int space_error{ path_error == 0 ? runtime::filex::availableSpace(available) : path_error };
+    const int space_error{
+        path_error == 0 ? runtime::filex::availableSpace(path, available) : path_error
+    };
     if (space_error != 0) {
         errno = space_error;
         return -1;
@@ -1520,7 +1791,15 @@ extern "C" int statvfs(const char* path, struct statvfs* value)
     *value = {};
     value->f_bsize = SECTOR_SIZE;
     value->f_frsize = SECTOR_SIZE;
-    value->f_blocks = TOTAL_SECTORS;
+    char normalized[MAXIMUM_PATH]{};
+    ResolvedPath resolved{};
+    const int resolve_error{ runtime::filex::normalizePath(path, normalized) };
+    if (resolve_error != 0 || resolve_normalized_path(normalized, resolved) != 0 ||
+        resolved.virtual_root) {
+        errno = resolve_error != 0 ? resolve_error : EINVAL;
+        return -1;
+    }
+    value->f_blocks = resolved.media->fx_media_total_sectors;
     value->f_bfree = static_cast<fsblkcnt_t>(available / SECTOR_SIZE);
     value->f_bavail = value->f_bfree;
     value->f_namemax = MAXIMUM_PATH - 1U;
@@ -1560,11 +1839,6 @@ extern "C" [[noreturn]] void _exit(int)
 {
     while (true) {
     }
-}
-extern "C" clock_t _times(struct tms*)
-{
-    errno = ENOSYS;
-    return static_cast<clock_t>(-1);
 }
 extern "C" int _getentropy(void* buffer, std::size_t length)
 {
@@ -1615,7 +1889,8 @@ extern "C" DIR* opendir(const char* path)
     }
     EntryInformation info{};
     char normalized[MAXIMUM_PATH]{};
-    int error{ normalize_path_unlocked(path, normalized) };
+    ResolvedPath resolved{};
+    int error{ resolve_path_unlocked(path, normalized, resolved) };
     if (error == 0) {
         error = information_unlocked(normalized, info);
     }
@@ -1636,7 +1911,27 @@ extern "C" DIR* opendir(const char* path)
     *slot = runtime_filex_directory_stream{};
     slot->allocated = true;
     std::memcpy(slot->path.data(), normalized, std::strlen(normalized) + 1U);
-    if (fx_directory_default_set(&media, slot->path.data()) != FX_SUCCESS) {
+    if (resolved.virtual_root) {
+        try {
+            for (const auto [volume, name] : {
+                   std::pair{ runtime::storage::Volume::flash, "flash" },
+                   std::pair{ runtime::storage::Volume::sd, "sd" } }) {
+                if (runtime::storage::mounted(volume)) {
+                    runtime_filex_directory_stream::Entry entry{};
+                    std::memcpy(entry.name.data(), name, std::strlen(name) + 1U);
+                    entry.type = DT_DIR;
+                    slot->entries.push_back(std::move(entry));
+                }
+            }
+        }
+        catch (...) {
+            *slot = runtime_filex_directory_stream{};
+            errno = ENOMEM;
+            return nullptr;
+        }
+        return &*slot;
+    }
+    if (fx_directory_default_set(resolved.media, resolved.local.data()) != FX_SUCCESS) {
         *slot = runtime_filex_directory_stream{};
         errno = EIO;
         return nullptr;
@@ -1645,7 +1940,7 @@ extern "C" DIR* opendir(const char* path)
     UINT attributes{};
     ULONG size{};
     UINT status{ fx_directory_first_full_entry_find(
-      &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) };
+      resolved.media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) };
     try {
         while (status == FX_SUCCESS) {
             if (std::strcmp(name, ".") != 0 && std::strcmp(name, "..") != 0) {
@@ -1655,16 +1950,25 @@ extern "C" DIR* opendir(const char* path)
                 slot->entries.push_back(std::move(entry));
             }
             status = fx_directory_next_full_entry_find(
-              &media, name, &attributes, &size, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+              resolved.media,
+              name,
+              &attributes,
+              &size,
+              nullptr,
+              nullptr,
+              nullptr,
+              nullptr,
+              nullptr,
+              nullptr);
         }
     }
     catch (...) {
-        static_cast<void>(fx_directory_default_set(&media, const_cast<CHAR*>("/")));
+        static_cast<void>(fx_directory_default_set(resolved.media, const_cast<CHAR*>("/")));
         *slot = runtime_filex_directory_stream{};
         errno = ENOMEM;
         return nullptr;
     }
-    static_cast<void>(fx_directory_default_set(&media, const_cast<CHAR*>("/")));
+    static_cast<void>(fx_directory_default_set(resolved.media, const_cast<CHAR*>("/")));
     if (status != FX_NO_MORE_ENTRIES) {
         *slot = runtime_filex_directory_stream{};
         errno = filex_errno(status);

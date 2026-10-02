@@ -9,6 +9,7 @@ void runtime_libc_initialize(void)
 
 #elif defined(HAL_PLATFORM_STM32)
 
+#include "cpu_clock.h"
 #include "hal/hal.hpp"
 
 #include <sys/lock.h>
@@ -22,6 +23,18 @@ void runtime_libc_initialize(void)
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Newlib's global reentrancy pointer is normally installed by ThreadX, but
+ * C++ constructors run before tx_kernel_enter(). Make pre-main allocation
+ * use Newlib's global state instead of passing a null reentrancy pointer into
+ * malloc. The lock hooks below already treat this phase as single-threaded. */
+static void runtime_libc_preinitialize(void)
+{
+    _impure_ptr = &_impure_data;
+}
+
+__attribute__((used, section(".preinit_array")))
+static void (*const runtime_libc_preinitializer)(void) = runtime_libc_preinitialize;
 
 /* Newlib deliberately keeps this type opaque, allowing the target to store
  * its native lock directly in each static and dynamically allocated object. */
@@ -291,7 +304,11 @@ void runtime_libc_thread_delete(TX_THREAD* thread_ptr)
     _reclaim_reent(&thread_ptr->tx_thread_libc_reent);
 }
 
-void _tx_execution_initialize(void) { _impure_ptr = &_impure_data; }
+void _tx_execution_initialize(void)
+{
+    _impure_ptr = &_impure_data;
+    runtime_cpu_clock_initialize();
+}
 
 void _tx_execution_thread_enter(void)
 {
@@ -300,13 +317,20 @@ void _tx_execution_thread_enter(void)
     }
     else {
         _impure_ptr = &_tx_thread_current_ptr->tx_thread_libc_reent;
+        runtime_cpu_clock_thread_enter();
     }
 }
 
-void _tx_execution_thread_exit(void) { _impure_ptr = &_impure_data; }
+void _tx_execution_thread_exit(void)
+{
+    runtime_cpu_clock_thread_exit();
+    _impure_ptr = &_impure_data;
+}
 
-void _tx_execution_isr_enter(void) {}
+/* The 1 kHz SysTick samples even when a thread runs uninterrupted or the
+ * scheduler stays idle, extending DWT's 32-bit cycle counter across wraps. */
+void _tx_execution_isr_enter(void) { runtime_cpu_clock_sample(); }
 
-void _tx_execution_isr_exit(void) {}
+void _tx_execution_isr_exit(void) { runtime_cpu_clock_sample(); }
 
 #endif

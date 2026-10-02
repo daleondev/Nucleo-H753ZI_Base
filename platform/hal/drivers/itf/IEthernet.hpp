@@ -68,6 +68,9 @@ namespace hal
         IEthernet(IEthernet&&) = delete;
         IEthernet& operator=(IEthernet&&) = delete;
 
+        // STM32 samples the negotiated PHY speed/duplex when starting. After
+        // attaching a cable or renegotiating the link, stop and start again to
+        // apply the new mode to the MAC.
         [[nodiscard]] virtual auto start() noexcept -> util::Result<> = 0;
         [[nodiscard]] virtual auto stop() noexcept -> util::Result<> = 0;
         [[nodiscard]] virtual auto isRunning() const noexcept -> bool = 0;

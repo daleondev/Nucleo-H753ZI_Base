@@ -13,6 +13,9 @@
 extern "C" int __real_main(int argc, char** argv);
 extern "C" void runtime_application_define() __attribute__((weak));
 extern "C" void runtime_filex_initialize();
+#if defined(HAL_PLATFORM_LINUX)
+extern "C" void runtime_application_prepare() __attribute__((weak));
+#endif
 
 namespace
 {
@@ -84,6 +87,11 @@ extern "C" int __wrap_main(int argc, char** argv)
     static_cast<void>(argv);
 #endif
 
+#if defined(HAL_PLATFORM_LINUX)
+    if (runtime_application_prepare != nullptr) {
+        runtime_application_prepare();
+    }
+#endif
     hal::initialize();
     tx_kernel_enter();
     Error_Handler();
@@ -108,16 +116,17 @@ extern "C" void tx_application_define(void* first_unused_memory)
                                     TX_NO_TIME_SLICE,
                                     TX_AUTO_START));
 
-#if defined(HAL_PLATFORM_STM32)
-    // Global constructors execute before ThreadX starts. Preserve the main
-    // execution context's TLS state when user main moves into its ThreadX thread.
-    runtime_tls_adopt_startup(&application_thread);
-#endif
-
     // This creates the runtime's reaper thread, after the application thread.
     runtime_libstdcxx_initialize();
 
     if (runtime_application_define != nullptr) {
         runtime_application_define();
     }
+
+#if defined(HAL_PLATFORM_STM32)
+    // Global constructors and the application-definition hook execute before
+    // ThreadX starts. Transfer their TLS only after all startup code finishes,
+    // so user main continues with the complete initial execution context.
+    runtime_tls_adopt_startup(&application_thread);
+#endif
 }

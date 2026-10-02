@@ -19,7 +19,13 @@
             "name": "base-stm32",
             "hidden": true,
             "inherits": "base",
-            "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake"
+            "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake",
+            "cacheVariables": {
+                "RUNTIME_HARDWARE_SELF_TEST": false,
+                "RUNTIME_HARDWARE_ETHERNET_TEST": false,
+                "RUNTIME_HARDWARE_IO_TEST": false,
+                "RUNTIME_STORAGE_ERASE_FLASH_ON_BOOT": false
+            }
         },
         {
             "name": "base-linux",
@@ -43,11 +49,30 @@
             }
         },
         {
-            "name": "runtime-test-stm32",
-            "displayName": "Runtime Self-Test STM32",
+            "name": "ethernet-test-stm32",
+            "displayName": "STM32 Ethernet Cable Test",
             "inherits": "debug-stm32",
             "cacheVariables": {
-                "RUNTIME_HARDWARE_SELF_TEST": true
+                "RUNTIME_HARDWARE_ETHERNET_TEST": true,
+                "RUNTIME_STORAGE_ERASE_FLASH_ON_BOOT": false
+            }
+        },
+        {
+            "name": "runtime-test-stm32",
+            "displayName": "STM32 Runtime Self-Test",
+            "inherits": "debug-stm32",
+            "cacheVariables": {
+                "RUNTIME_HARDWARE_SELF_TEST": true,
+                "RUNTIME_STORAGE_ERASE_FLASH_ON_BOOT": false
+            }
+        },
+        {
+            "name": "io-test-stm32",
+            "displayName": "STM32 Serial and Persistence Test",
+            "inherits": "debug-stm32",
+            "cacheVariables": {
+                "RUNTIME_HARDWARE_IO_TEST": true,
+                "RUNTIME_STORAGE_ERASE_FLASH_ON_BOOT": false
             }
         },
         {
@@ -89,6 +114,10 @@
             "configurePreset": "runtime-test-stm32"
         },
         {
+            "name": "ethernet-test-stm32",
+            "configurePreset": "ethernet-test-stm32"
+        },
+        {
             "name": "debug-linux",
             "configurePreset": "debug-linux"
         },
@@ -100,6 +129,10 @@
         {
             "name": "release-linux",
             "configurePreset": "release-linux"
+        },
+        {
+            "name": "io-test-stm32",
+            "configurePreset": "io-test-stm32"
         }
     ]
 }

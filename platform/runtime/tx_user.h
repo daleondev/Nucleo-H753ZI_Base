@@ -15,6 +15,9 @@
 #if defined(__ARM_EABI__)
 /* Switch Newlib's per-thread reentrancy state on context changes. */
 #define TX_ENABLE_EXECUTION_CHANGE_NOTIFY
+/* CubeMX's SysTick shell gates its profiling hooks on this additional macro.
+ * Keep our own execution-change handlers: they also maintain Newlib state. */
+#define TX_EXECUTION_PROFILE_ENABLE
 #endif
 
 #if !defined(__ASSEMBLER__)
@@ -119,6 +122,21 @@ extern void runtime_tls_thread_delete(struct TX_THREAD_STRUCT* thread_ptr);
         RUNTIME_THREADX_TLS_DELETE(thread_ptr)        \
         runtime_libc_thread_delete(thread_ptr);      \
         TX_DISABLE                                   \
+    } while (0);
+
+/* Reset restarts a completed/terminated thread's entry function. Its C++ TLS
+ * objects may already have been destroyed, so a restarted thread needs fresh
+ * TLS and Newlib state. The target is marked TX_NOT_DONE by ThreadX while this
+ * hook runs. As for deletion, restore the caller's interrupt posture around
+ * allocation/reclamation; no user destructors run in the resetting thread. */
+#define TX_THREAD_RESET_PORT_COMPLETION(thread_ptr) \
+    do {                                            \
+        TX_RESTORE                                  \
+        RUNTIME_THREADX_TLS_DELETE(thread_ptr)       \
+        runtime_libc_thread_delete(thread_ptr);     \
+        RUNTIME_THREADX_LIBC_CREATE(thread_ptr)      \
+        RUNTIME_THREADX_TLS_CREATE(thread_ptr)       \
+        TX_DISABLE                                  \
     } while (0);
 #endif
 

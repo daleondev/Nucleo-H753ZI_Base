@@ -1,4 +1,7 @@
 #include "hal/drivers/factory/timer.hpp"
+#include "hardware_driver_checks.hpp"
+#include "hardware_runtime_checks.hpp"
+#include "hardware_storage_checks.hpp"
 
 #include <algorithm>
 #include <any>
@@ -50,11 +53,15 @@
 extern "C" int _getentropy(void* buffer, std::size_t length);
 extern "C" int _write(int file, const char* buffer, int length);
 
+extern "C" void runtime_application_define() { runtime::hardware_checks::capture_late_startup_tls(); }
+
 extern "C" {
 // These stable values are convenient acceptance points for a debugger or
 // an automated probe when the serial connection is unavailable.
 std::uint32_t runtime_hardware_self_test_status{};
 std::uint32_t runtime_hardware_self_test_phase{};
+
+[[gnu::noinline, gnu::used]] void runtime_hardware_self_test_complete() { asm volatile("" ::: "memory"); }
 }
 
 namespace
@@ -184,6 +191,10 @@ namespace
 
     [[nodiscard]] bool test_threads_and_synchronization()
     {
+        if (!runtime::hardware_checks::thread_names() ||
+            !runtime::hardware_checks::static_initializer_can_join()) {
+            return false;
+        }
         std::mutex mutex;
         std::condition_variable condition;
         bool ready{};
@@ -334,6 +345,9 @@ namespace
 
     [[nodiscard]] bool test_atomics_futures_and_exceptions()
     {
+        if (!runtime::hardware_checks::non_native_atomic_width()) {
+            return false;
+        }
         std::atomic<int> value{};
         std::binary_semaphore atomic_wait_started{ 0 };
         std::atomic_bool atomic_wait_returned{};
@@ -418,6 +432,11 @@ namespace
 
     [[nodiscard]] bool test_tls_and_thread_exit_order()
     {
+        if (!runtime::hardware_checks::tls_destructor_can_join() ||
+            !runtime::hardware_checks::late_startup_tls_is_preserved() ||
+            !runtime::hardware_checks::native_thread_reset_reinitializes_runtime()) {
+            return false;
+        }
         if (startup_tls_address == nullptr || startup_tls_address != &startup_tls_probe ||
             startup_tls_probe.self != &startup_tls_probe || startup_tls_probe.value != 0xC0FFEEU) {
             return false;
@@ -568,10 +587,40 @@ namespace
                                     [&](auto value) { return value == random_values.front(); });
     }
 
+    [[nodiscard]] bool test_console_writers()
+    {
+        // These raw writes bypass stdio's per-FILE lock. A higher-priority
+        // writer preempts a long transmission, exercising the UART's own lock.
+        // A UART capture must contain exactly 2048 A bytes and 128 B bytes
+        // between the markers; the old BSP silently discarded HAL_BUSY bytes.
+        log("[uart-stress-begin]");
+        bool slow_passed{};
+        bool fast_passed{ true };
+        std::binary_semaphore started{ 0 };
+        auto slow = runtime::thread::create({ .priority = 18 }, [&] {
+            std::array<char, 2048U> bytes;
+            bytes.fill('A');
+            started.release();
+            slow_passed = _write(STDOUT_FILENO, bytes.data(), static_cast<int>(bytes.size())) ==
+                          static_cast<int>(bytes.size());
+        });
+        auto fast = runtime::thread::create({ .priority = 17 }, [&] {
+            started.acquire();
+            for (unsigned int index{}; index < 128U; ++index) {
+                std::this_thread::sleep_for(1ms);
+                fast_passed = (_write(STDERR_FILENO, "B", 1) == 1) && fast_passed;
+            }
+        });
+        slow.join();
+        fast.join();
+        log("\n[uart-stress-end]");
+        return slow_passed && fast_passed;
+    }
+
     [[nodiscard]] bool test_many_streams_and_threads()
     {
         namespace fs = std::filesystem;
-        const fs::path directory{ "/stream-stress" };
+        const fs::path directory{ "/flash/stream-stress" };
         std::error_code error;
         static_cast<void>(fs::remove_all(directory, error));
         error.clear();
@@ -620,7 +669,43 @@ namespace
             } };
             thread.join();
         }
-        return true;
+        return test_console_writers();
+    }
+
+    [[nodiscard]] bool test_cpu_clock()
+    {
+        const auto milliseconds_between = [](std::clock_t before, std::clock_t after) {
+            return before == static_cast<std::clock_t>(-1) || after == static_cast<std::clock_t>(-1) ||
+                       after < before
+                     ? -1.0
+                     : 1000.0 * static_cast<double>(after - before) / CLOCKS_PER_SEC;
+        };
+        const auto idle_before{ std::clock() };
+        std::this_thread::sleep_for(200ms);
+        const double idle_cpu{ milliseconds_between(idle_before, std::clock()) };
+
+        const auto spin = [](std::chrono::milliseconds duration) {
+            const auto deadline{ std::chrono::steady_clock::now() + duration };
+            while (std::chrono::steady_clock::now() < deadline) {
+                std::atomic_signal_fence(std::memory_order_seq_cst);
+            }
+        };
+        const auto worker_before{ std::clock() };
+        std::thread worker{ [&] { spin(200ms); } };
+        worker.join();
+        const double worker_cpu{ milliseconds_between(worker_before, std::clock()) };
+
+        // Longer than one full DWT revolution at the board's 480 MHz. No clock()
+        // reads in the loop: SysTick must extend the counter independently.
+        const auto busy_before{ std::clock() };
+        spin(9500ms);
+        const double busy_cpu{ milliseconds_between(busy_before, std::clock()) };
+        log("[runtime-self-test] CPU ms: idle=%.1f worker=%.1f counter-wrap=%.1f",
+            idle_cpu,
+            worker_cpu,
+            busy_cpu);
+        return idle_cpu >= 0.0 && idle_cpu < 50.0 && worker_cpu >= 170.0 && worker_cpu <= 250.0 &&
+               busy_cpu >= 9400.0 && busy_cpu <= 9600.0;
     }
 
     [[nodiscard]] bool test_clocks()
@@ -634,11 +719,16 @@ namespace
         const std::time_t chrono_time{ std::chrono::system_clock::to_time_t(system_after) };
         const auto difference{ c_time > chrono_time ? c_time - chrono_time : chrono_time - c_time };
         return std::chrono::steady_clock::is_steady && steady_after - steady_before >= 5ms &&
-               system_after > system_before && c_time >= 946'684'800 && difference <= 2;
+               system_after > system_before && c_time >= 946'684'800 && difference <= 2 && test_cpu_clock();
     }
 
     [[nodiscard]] bool test_hardware_timer()
     {
+        if (!hardware_driver_checks::gpio_output_toggle() ||
+            !hardware_driver_checks::gpio_interrupt_ownership() ||
+            !hardware_driver_checks::ethernet_loopback()) {
+            return false;
+        }
         constexpr std::size_t TIMER_INDEX{ 2U };
         constexpr std::uint32_t TEST_TICK_FREQUENCY_HZ{ 10'000U };
 
@@ -656,17 +746,14 @@ namespace
         }
 
         timer->setPrescaler(std::numeric_limits<hal::ITimer::Tick>::max());
-        const bool prescaler_saturated{
-            timer->getPrescaler() == std::numeric_limits<std::uint16_t>::max()
-        };
+        const bool prescaler_saturated{ timer->getPrescaler() == std::numeric_limits<std::uint16_t>::max() };
         const auto divisor{ timer->getInputFrequencyHz() / TEST_TICK_FREQUENCY_HZ };
         timer->setPrescaler(divisor - 1U);
         timer->setAutoReload(std::numeric_limits<hal::ITimer::Tick>::max());
         timer->setCounter(0U);
 
-        bool passed{ prescaler_saturated &&
-                     timer->getTickFrequencyHz() == TEST_TICK_FREQUENCY_HZ && timer->start() &&
-                     timer->start() };
+        bool passed{ prescaler_saturated && timer->getTickFrequencyHz() == TEST_TICK_FREQUENCY_HZ &&
+                     timer->start() && timer->start() };
         std::this_thread::sleep_for(20ms);
         const auto measured_ticks{ timer->getCounter() };
         // At 10 kHz this should be hundreds of ticks. If PSC remained buffered,
@@ -705,8 +792,11 @@ namespace
 
     [[nodiscard]] bool test_filex_standard_library()
     {
+        if (!runtime::tests::check_storage_offsets("/flash/runtime-offset-test.bin")) {
+            return false;
+        }
         namespace fs = std::filesystem;
-        const fs::path root{ "/runtime-self-test" };
+        const fs::path root{ "/flash/runtime-self-test" };
         const fs::path nested{ root / "nested" };
         const fs::path source{ nested / "source.txt" };
         const fs::path copy{ nested / "copy.txt" };
@@ -770,7 +860,7 @@ namespace
         }
 
         const fs::space_info volume{ fs::space(root, error) };
-        if (error || volume.capacity != 32U * 1024U || volume.available > volume.capacity) {
+        if (error || volume.capacity != 24U * 1024U * 512U || volume.available > volume.capacity) {
             return false;
         }
 
@@ -797,7 +887,7 @@ namespace
             return false;
         }
 
-        const fs::path tree{ "/self-move" };
+        const fs::path tree{ "/flash/self-move" };
         const fs::path child{ tree / "child" };
         if (!fs::create_directories(child, error) || error) {
             return false;
@@ -808,6 +898,43 @@ namespace
         const bool tree_survived{ fs::is_directory(child, error) && !error };
         static_cast<void>(fs::remove_all(tree, error));
         return rejected_self_move && tree_survived && !error;
+    }
+
+    [[nodiscard]] bool test_sd_standard_library()
+    {
+        if (!runtime::tests::check_storage_offsets("/sd/runtime-offset-test.bin")) {
+            return false;
+        }
+        namespace fs = std::filesystem;
+        const fs::path path{ "/sd/runtime-self-test.bin" };
+        constexpr std::array<std::uint8_t, 8U> CONTENT{
+            0x53U, 0x44U, 0x4DU, 0x4DU, 0x43U, 0x2DU, 0x4FU, 0x4BU
+        };
+        std::error_code error;
+        static_cast<void>(fs::remove(path, error));
+        error.clear();
+        {
+            std::ofstream stream{ path, std::ios::binary | std::ios::trunc };
+            stream.write(reinterpret_cast<const char*>(CONTENT.data()),
+                         static_cast<std::streamsize>(CONTENT.size()));
+            if (!stream) {
+                return false;
+            }
+        }
+        std::array<std::uint8_t, CONTENT.size()> input{};
+        {
+            std::ifstream stream{ path, std::ios::binary };
+            stream.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(input.size()));
+            if (!stream || input != CONTENT) {
+                return false;
+            }
+        }
+        const fs::space_info volume{ fs::space("/sd", error) };
+        const bool passed{ !error && volume.capacity >= 8U * 1024U * 1024U * 1024U &&
+                           volume.available <= volume.capacity };
+        error.clear();
+        static_cast<void>(fs::remove(path, error));
+        return passed && !error;
     }
 
     struct NamedTest
@@ -824,14 +951,16 @@ namespace
         NamedTest{ "libc reentrancy and entropy", test_libc_reentrancy_and_entropy },
         NamedTest{ "stream and thread stress", test_many_streams_and_threads },
         NamedTest{ "clocks", test_clocks },
-        NamedTest{ "HAL timer", test_hardware_timer },
-        NamedTest{ "FileX standard library", test_filex_standard_library },
+        NamedTest{ "HAL peripherals", test_hardware_timer },
+        NamedTest{ "LevelX/FileX flash standard library", test_filex_standard_library },
+        NamedTest{ "FileX SD standard library", test_sd_standard_library },
     };
 
     [[noreturn]] void finish(bool passed, std::size_t phase)
     {
         runtime_hardware_self_test_status =
           passed ? PASS_STATUS : FAIL_STATUS | static_cast<std::uint32_t>(phase);
+        runtime_hardware_self_test_complete();
         log(passed ? "[runtime-self-test] PASS" : "[runtime-self-test] FAIL");
         while (true) {
             std::this_thread::sleep_for(1s);

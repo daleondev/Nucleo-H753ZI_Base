@@ -1,32 +1,13 @@
-if(RUNTIME_HARDWARE_SELF_TEST)
-    target_sources(${PROJECT_NAME}
-        PRIVATE
-            ${PROJECT_SOURCE_DIR}/platform/runtime/tests/hardware_self_test.cpp
-    )
-    target_compile_definitions(${PROJECT_NAME}
-        PRIVATE
-            RUNTIME_APPLICATION_THREAD_STACK_SIZE=32768U
-    )
+if(RUNTIME_HARDWARE_ETHERNET_TEST)
+    set(application_source ${PROJECT_SOURCE_DIR}/platform/hal/tests/hardware_ethernet_test.cpp)
+elseif(RUNTIME_HARDWARE_IO_TEST)
+    set(application_source ${PROJECT_SOURCE_DIR}/platform/runtime/tests/hardware_io_test.cpp)
+elseif(RUNTIME_HARDWARE_SELF_TEST)
+    set(application_source ${PROJECT_SOURCE_DIR}/platform/runtime/tests/hardware_self_test.cpp)
 else()
-    target_sources(${PROJECT_NAME}
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-    )
+    set(application_source ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 endif()
 
-target_include_directories(${PROJECT_NAME}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        platform::hal
-)
-
-if(RUNTIME_HARDWARE_SELF_TEST)
-    target_compile_definitions(runtime_libstdcxx
-        PRIVATE
-            RUNTIME_STD_THREAD_STACK_SIZE=8192U
-    )
-endif()
+target_sources(${PROJECT_NAME} PRIVATE ${application_source})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(${PROJECT_NAME} PRIVATE platform::hal)

@@ -129,9 +129,12 @@ RUNTIME_DEFINE_ATOMIC_FETCH_OPERATION(nand, ~(left& right))
 
 #undef RUNTIME_DEFINE_ATOMIC_FETCH_OPERATION
 
-extern "C" bool __atomic_is_lock_free(std::size_t size, const volatile void*)
+extern "C" bool __atomic_is_lock_free(std::size_t size, const volatile void* pointer)
 {
-    return size <= sizeof(std::uint32_t);
+    // Match the native exclusive-access widths and their alignment. Other
+    // sizes (including three-byte records) use the generic masked helpers.
+    return size == 1U ||
+           ((size == 2U || size == 4U) && reinterpret_cast<std::uintptr_t>(pointer) % size == 0U);
 }
 
 // Generic libatomic ABI used for std::atomic<T> when T has no sized compiler

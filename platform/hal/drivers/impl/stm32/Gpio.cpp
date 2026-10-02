@@ -184,6 +184,7 @@ namespace hal
         enable_port_clock(configuration.pin.port);
 
         if (configuration.edge != gpio::Edge::None) {
+            HAL_NVIC_DisableIRQ(m_interrupt);
             if (!interruptLineAvailable(configuration.pin)) {
                 std::terminate();
             }
@@ -198,7 +199,10 @@ namespace hal
         HAL_GPIO_Init(m_port, &gpio_configuration);
 
         if (configuration.edge != gpio::Edge::None) {
-            HAL_NVIC_ClearPendingIRQ(m_interrupt);
+            // NVIC pending state is shared by grouped EXTI lines. Clear only
+            // this pin's peripheral flag so a previous owner cannot trigger
+            // the new callback, while preserving other pins' pending edges.
+            __HAL_GPIO_EXTI_CLEAR_IT(m_pinMask);
             HAL_NVIC_SetPriority(m_interrupt, GPIO_INTERRUPT_PRIORITY, 0U);
             HAL_NVIC_EnableIRQ(m_interrupt);
         }
@@ -208,7 +212,8 @@ namespace hal
     {
         if (m_configuration.edge != gpio::Edge::None) {
             HAL_NVIC_DisableIRQ(m_interrupt);
-            HAL_NVIC_ClearPendingIRQ(m_interrupt);
+            HAL_GPIO_DeInit(m_port, m_pinMask);
+            __HAL_GPIO_EXTI_CLEAR_IT(m_pinMask);
             s_interruptRegistry[m_configuration.pin.number] = nullptr;
 
             const bool group_still_used{ std::ranges::any_of(s_interruptRegistry, [&](const auto* input) {
@@ -217,8 +222,13 @@ namespace hal
             if (group_still_used) {
                 HAL_NVIC_EnableIRQ(m_interrupt);
             }
+            else {
+                HAL_NVIC_ClearPendingIRQ(m_interrupt);
+            }
         }
-        HAL_GPIO_DeInit(m_port, m_pinMask);
+        else {
+            HAL_GPIO_DeInit(m_port, m_pinMask);
+        }
     }
 
     auto GpioInput::read() const noexcept -> gpio::Level
@@ -228,16 +238,11 @@ namespace hal
 
     auto GpioInput::setEdgeCallback(EdgeCallback callback) noexcept -> void
     {
-        if (m_configuration.edge == gpio::Edge::None) {
-            m_edgeCallback = std::move(callback);
-            return;
-        }
-
-        const bool restore_interrupt{ NVIC_GetEnableIRQ(m_interrupt) != 0U };
-        HAL_NVIC_DisableIRQ(m_interrupt);
-        m_edgeCallback = std::move(callback);
-        if (restore_interrupt) {
-            HAL_NVIC_EnableIRQ(m_interrupt);
+        {
+            // Exclude both EXTI and a task switch between concurrent setters.
+            // Destroy the previous callback after leaving the critical section.
+            const stm32::InterruptGuard interrupt_guard;
+            m_edgeCallback.swap(callback);
         }
     }
 
@@ -287,14 +292,13 @@ namespace hal
     auto GpioOutput::toggle() noexcept -> void
     {
         const stm32::InterruptGuard interrupt_guard;
-        write(gpio::inverted(read()));
+        // Toggle the output latch, not IDR: an open-drain output can be held
+        // low externally even when its latch is high (released).
+        HAL_GPIO_TogglePin(m_port, m_pinMask);
     }
 }
 
-extern "C" void HAL_GPIO_EXTI_Callback(std::uint16_t pin_mask)
-{
-    hal::GpioInput::dispatchEdge(pin_mask);
-}
+extern "C" void HAL_GPIO_EXTI_Callback(std::uint16_t pin_mask) { hal::GpioInput::dispatchEdge(pin_mask); }
 
 extern "C" void EXTI0_IRQHandler() { HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0); }
 extern "C" void EXTI1_IRQHandler() { HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1); }

@@ -34,12 +34,25 @@ namespace hal
         if (BSP_COM_Init(COM1, &bsp_com_init) != BSP_ERROR_NONE) {
             Error_Handler();
         }
+#if defined(HAL_PLATFORM_STM32)
+        // Enabling FIFO mode disables the UART briefly. Do this before any
+        // application thread can transmit or wait for console input.
+        if (HAL_UARTEx_EnableFifoMode(&hcom_uart[COM1]) != HAL_OK) {
+            Error_Handler();
+        }
+#endif
     }
 
     auto panic(const char* message, std::source_location location) noexcept -> void
     {
+        panic(message, nullptr, location);
+    }
+
+    auto panic(const char* message, const char* detail, std::source_location location) noexcept -> void
+    {
         const HalPanicInfo info{
             .message = message,
+            .detail = detail,
             .file = location.file_name(),
             .function = location.function_name(),
             .line = location.line(),
@@ -52,6 +65,7 @@ extern "C" [[noreturn]] void hal_error_handler() noexcept
 {
     const HalPanicInfo info{
         .message = "HAL Error_Handler invoked",
+        .detail = nullptr,
         .file = nullptr,
         .function = nullptr,
         .line = 0U,

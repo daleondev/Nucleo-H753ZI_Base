@@ -13,10 +13,11 @@
 #define _GLIBCXX_USE_GETCWD 1
 #define _GLIBCXX_USE_CHDIR 1
 #define _GLIBCXX_HAVE_SYS_STATVFS_H 1
+#define _GLIBCXX_USE_UTIME 1
 
 /* GCC 16's Newlib configuration advertises the *at interfaces, but this
  * FileX adapter has no directory file descriptors. Keep libstdc++ on its
- * path-based fallback, as GCC 15 already did for this target. */
+ * path-based fallback. */
 #undef _GLIBCXX_HAVE_OPENAT
 #undef _GLIBCXX_HAVE_UNLINKAT
 
@@ -26,9 +27,13 @@
 #undef _GLIBCXX_USE_FCHMOD
 #undef _GLIBCXX_USE_FCHMODAT
 
-/* The project supplies an Arm TLS ABI implementation in tls.cpp. Enable
- * libstdc++'s thread-local call_once trampoline instead of its global-functor
- * fallback, which has known reentrancy limitations. */
+#endif
+
+/* The embedded runtime supplies an Arm TLS ABI implementation in tls.cpp.
+ * This runtime-owned definition is propagated to every consumer so all
+ * translation units select the same thread-local call_once ABI, including
+ * libraries that do not link to the HAL target directly. */
+#if defined(RUNTIME_LIBSTDCXX_HAVE_TLS)
 #define _GLIBCXX_HAVE_TLS 1
 #endif
 

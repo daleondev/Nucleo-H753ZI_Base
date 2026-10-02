@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -27,8 +28,27 @@
 #define RUNTIME_STD_THREAD_PRIORITY 16U
 #endif
 
+namespace
+{
+    thread_local std::optional<runtime::thread::Attributes> pending_attributes;
+
+    void cleanup_thread_runtime(TX_THREAD* thread) noexcept;
+}
+
 namespace runtime
 {
+    namespace thread
+    {
+        void publish_attributes(const Attributes& attributes) noexcept { pending_attributes = attributes; }
+
+        std::optional<Attributes> consume_attributes() noexcept
+        {
+            auto result{ pending_attributes };
+            pending_attributes.reset();
+            return result;
+        }
+    }
+
     namespace detail
     {
         namespace
@@ -110,11 +130,16 @@ namespace runtime
                 bool detached{};
                 bool finished{};
                 bool cleanup_queued{};
-                char name[24]{};
+                char name[32]{};
             };
 
             static_assert(offsetof(ThreadControl, thread) == 0U);
-            static_assert(RUNTIME_STD_THREAD_PRIORITY < 32U);
+            static_assert((STACK_ALIGNMENT & (STACK_ALIGNMENT - 1U)) == 0U);
+            static_assert(alignof(std::max_align_t) >= STACK_ALIGNMENT);
+            static_assert(RUNTIME_STD_THREAD_STACK_SIZE >= TX_MINIMUM_STACK);
+            static_assert(RUNTIME_STD_THREAD_STACK_SIZE % STACK_ALIGNMENT == 0U);
+            static_assert(RUNTIME_STD_THREAD_STACK_SIZE <= std::numeric_limits<ULONG>::max());
+            static_assert(RUNTIME_STD_THREAD_PRIORITY < TX_MAX_PRIORITIES);
             static_assert(std::atomic_ref<void*>::required_alignment <= alignof(MutexHandle));
             static_assert(std::atomic_ref<void*>::required_alignment <= alignof(ConditionHandle));
             static_assert(std::atomic_ref<void*>::required_alignment <= alignof(SemaphoreHandle));
@@ -166,6 +191,61 @@ namespace runtime
             [[nodiscard]] unsigned int key_generation(KeyHandle key) noexcept
             {
                 return key >> KEY_INDEX_BITS;
+            }
+
+            [[nodiscard]] bool validate_thread_priority(int32_t requested_prio, UINT& validated_prio) noexcept
+            {
+                if (requested_prio == -1) {
+                    requested_prio = RUNTIME_STD_THREAD_PRIORITY;
+                }
+                if (requested_prio < 0 || requested_prio >= static_cast<int32_t>(TX_MAX_PRIORITIES)) {
+                    return false;
+                }
+                validated_prio = static_cast<UINT>(requested_prio);
+                return true;
+            }
+
+            [[nodiscard]] bool normalize_thread_stack_size(std::size_t requested_size,
+                                                           ULONG& normalized_size) noexcept
+            {
+                if (requested_size == 0U) {
+                    requested_size = RUNTIME_STD_THREAD_STACK_SIZE;
+                }
+                constexpr std::size_t alignment_mask{ STACK_ALIGNMENT - 1U };
+                if (requested_size < TX_MINIMUM_STACK ||
+                    requested_size > std::numeric_limits<std::size_t>::max() - alignment_mask) {
+                    return false;
+                }
+                requested_size = (requested_size + alignment_mask) & ~alignment_mask;
+                if (requested_size > std::numeric_limits<ULONG>::max()) {
+                    return false;
+                }
+                normalized_size = static_cast<ULONG>(requested_size);
+                return true;
+            }
+
+            [[nodiscard]]
+            std::optional<std::string_view> snake_to_camel(std::string_view input,
+                                                           std::span<char> output) noexcept
+            {
+                auto written{ 0UZ };
+                auto capitalize_next{ true };
+
+                for (auto c : input) {
+                    if (c == '_') {
+                        capitalize_next = written != 0;
+                        continue;
+                    }
+                    if (written == output.size()) {
+                        return std::nullopt;
+                    }
+                    output[written++] = capitalize_next
+                                          ? static_cast<char>(std::toupper(static_cast<unsigned char>(c)))
+                                          : c;
+                    capitalize_next = false;
+                }
+
+                return std::string_view{ output.data(), written };
             }
 
             [[nodiscard]] bool valid_high_resolution_counter(const HighResolutionCounter& counter) noexcept
@@ -640,6 +720,11 @@ namespace runtime
                 }
                 static_cast<void>(control->entry(control->argument));
 
+                // Exit callbacks may themselves join other threads. Do not
+                // enqueue this thread until they finish: the single reaper
+                // must remain available to service those nested joins.
+                cleanup_thread_runtime(&control->thread);
+
                 raw_mutex_get(&control->lifecycle_mutex);
                 control->finished = true;
                 const bool enqueue{ control->detached && !control->cleanup_queued };
@@ -715,7 +800,10 @@ namespace runtime
             return initialized && !interrupt_context() && tx_thread_identify() != TX_NULL;
         }
 
-        int thread_create(ThreadHandle* thread, void* (*entry)(void*), void* argument) noexcept
+        int thread_create(ThreadHandle* thread,
+                          void* (*entry)(void*),
+                          void* argument,
+                          const thread::Attributes& attributes) noexcept
         {
             const int context_status{ require_thread_context() };
             if (context_status != 0) {
@@ -724,12 +812,20 @@ namespace runtime
             if (thread == nullptr || entry == nullptr) {
                 return EINVAL;
             }
+            ULONG normalized_stack_size{};
+            if (!normalize_thread_stack_size(attributes.stack_size, normalized_stack_size)) {
+                return EINVAL;
+            }
+            UINT validated_priority{};
+            if (!validate_thread_priority(attributes.priority, validated_priority)) {
+                return EINVAL;
+            }
 
             auto* control{ new (std::nothrow) ThreadControl{} };
             if (control == nullptr) {
                 return EAGAIN;
             }
-            control->stack = ::operator new[](RUNTIME_STD_THREAD_STACK_SIZE, std::nothrow);
+            control->stack = ::operator new[](static_cast<std::size_t>(normalized_stack_size), std::nothrow);
             if (control->stack == nullptr) {
                 delete control;
                 return EAGAIN;
@@ -737,11 +833,25 @@ namespace runtime
             control->entry = entry;
             control->argument = argument;
 
-            const ULONG old_posture{ tx_interrupt_control(TX_INT_DISABLE) };
-            const std::uint32_t number{ next_thread_number++ };
-            static_cast<void>(tx_interrupt_control(old_posture));
-            static_cast<void>(std::snprintf(
-              control->name, sizeof(control->name), "std::thread %lu", static_cast<unsigned long>(number)));
+            if (attributes.name.empty()) {
+                const ULONG old_posture{ tx_interrupt_control(TX_INT_DISABLE) };
+                const std::uint32_t number{ next_thread_number++ };
+                static_cast<void>(tx_interrupt_control(old_posture));
+                static_cast<void>(std::snprintf(control->name,
+                                                sizeof(control->name),
+                                                "std::thread %lu",
+                                                static_cast<unsigned long>(number)));
+            }
+            else {
+                std::array<char, sizeof(control->name)> convert_buff;
+                auto converted_name{ snake_to_camel(attributes.name, convert_buff).value_or("Unknown") };
+                static_cast<void>(
+                  std::snprintf(control->name,
+                                sizeof(control->name),
+                                "%.*s Thread",
+                                static_cast<int>(converted_name.size()),
+                                converted_name.data()));
+            }
 
             if (tx_mutex_create(&control->lifecycle_mutex, lifecycle_mutex_name, TX_INHERIT) != TX_SUCCESS) {
                 ::operator delete[](control->stack);
@@ -762,9 +872,9 @@ namespace runtime
                                                 thread_entry,
                                                 control->registry_id,
                                                 control->stack,
-                                                RUNTIME_STD_THREAD_STACK_SIZE,
-                                                RUNTIME_STD_THREAD_PRIORITY,
-                                                RUNTIME_STD_THREAD_PRIORITY,
+                                                normalized_stack_size,
+                                                validated_priority,
+                                                validated_priority,
                                                 TX_NO_TIME_SLICE,
                                                 TX_AUTO_START) };
             if (status != TX_SUCCESS) {
@@ -1577,6 +1687,14 @@ extern "C" void runtime_libstdcxx_thread_create(TX_THREAD* thread)
 
 extern "C" void runtime_libstdcxx_thread_started(TX_THREAD* thread)
 {
+    // This hook also runs after tx_thread_reset(). Do not retain TSS values
+    // from the previous execution, including keys without destructors.
+    for (void*& value : thread->tx_thread_runtime_tls_values) {
+        value = nullptr;
+    }
+    for (unsigned int& generation : thread->tx_thread_runtime_tls_generations) {
+        generation = 0U;
+    }
     thread->tx_thread_runtime_cleanup_started = 0U;
     if (tx_thread_entry_exit_notify(thread, runtime_libstdcxx_thread_notify) != TX_SUCCESS) {
         std::terminate();

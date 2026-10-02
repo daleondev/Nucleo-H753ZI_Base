@@ -80,6 +80,17 @@ namespace
             guard_failure("tx_mutex_put static initialization", status);
         }
     }
+
+    void acquire_guard_mutex(bool locked) noexcept
+    {
+        if (!locked) {
+            return;
+        }
+        const UINT status{ tx_mutex_get(&cxx_guard_mutex, TX_WAIT_FOREVER) };
+        if (status != TX_SUCCESS) {
+            guard_failure("tx_mutex_get static initialization", status);
+        }
+    }
 }
 
 namespace runtime::detail
@@ -121,27 +132,30 @@ extern "C" int __cxa_guard_acquire(void* guard)
     }
 
     const bool locked{ locking_required() };
-    if (locked) {
-        const UINT status{ tx_mutex_get(&cxx_guard_mutex, TX_WAIT_FOREVER) };
+    while (true) {
+        acquire_guard_mutex(locked);
+        if (load_guard_byte(guard, INITIALIZED_BYTE) != 0U) {
+            release_guard_mutex(locked);
+            return 0;
+        }
+        if (load_guard_byte(guard, IN_PROGRESS_BYTE) == 0U) {
+            store_guard_byte(guard, IN_PROGRESS_BYTE, 1U, __ATOMIC_RELAXED);
+            release_guard_mutex(locked);
+            return 1;
+        }
+        release_guard_mutex(locked);
+
+        if (!locked) {
+            guard_failure("recursive static initialization", TX_NOT_DONE);
+        }
+        // Only callers initializing this same object must wait. Holding the
+        // global guard mutex across user code can deadlock an initializer that
+        // joins a thread which initializes an unrelated static object.
+        const UINT status{ tx_thread_sleep(1U) };
         if (status != TX_SUCCESS) {
-            guard_failure("tx_mutex_get static initialization", status);
+            guard_failure("static initialization wait", status);
         }
     }
-
-    if (load_guard_byte(guard, INITIALIZED_BYTE) != 0U) {
-        release_guard_mutex(locked);
-        return 0;
-    }
-
-    // The mutex is recursive. Seeing this byte while holding it therefore
-    // means the same thread recursively entered this exact initializer.
-    if (load_guard_byte(guard, IN_PROGRESS_BYTE) != 0U) {
-        guard_failure("recursive static initialization", TX_NOT_DONE);
-    }
-
-    store_guard_byte(guard, IN_PROGRESS_BYTE, 1U, __ATOMIC_RELAXED);
-    // Keep the recursive mutex locked across the user-provided initializer.
-    return 1;
 }
 
 extern "C" void __cxa_guard_release(void* guard)
@@ -150,9 +164,11 @@ extern "C" void __cxa_guard_release(void* guard)
         guard_failure("__cxa_guard_release", TX_PTR_ERROR);
     }
 
+    const bool locked{ locking_required() };
+    acquire_guard_mutex(locked);
     store_guard_byte(guard, IN_PROGRESS_BYTE, 0U, __ATOMIC_RELAXED);
     store_guard_byte(guard, INITIALIZED_BYTE, 1U, __ATOMIC_RELEASE);
-    release_guard_mutex(locking_required());
+    release_guard_mutex(locked);
 }
 
 extern "C" void __cxa_guard_abort(void* guard)
@@ -161,8 +177,10 @@ extern "C" void __cxa_guard_abort(void* guard)
         guard_failure("__cxa_guard_abort", TX_PTR_ERROR);
     }
 
+    const bool locked{ locking_required() };
+    acquire_guard_mutex(locked);
     store_guard_byte(guard, IN_PROGRESS_BYTE, 0U, __ATOMIC_RELEASE);
-    release_guard_mutex(locking_required());
+    release_guard_mutex(locked);
 }
 
 // NOLINTEND(bugprone-reserved-identifier,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)

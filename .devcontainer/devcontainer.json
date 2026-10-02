@@ -1,16 +1,11 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
-    "name": "C++",
+    "name": "NUCLEO-H753ZI GCC 16",
     "build": {
         "dockerfile": "Dockerfile"
     },
     "initializeCommand": "git submodule sync --recursive && git submodule update --init --recursive",
-    "features": {
-        "ghcr.io/devcontainers/features/docker-in-docker:2": {
-            "enableNonRootDocker": "true"
-        }
-    },
     "runArgs": [
         "--privileged"
     ],

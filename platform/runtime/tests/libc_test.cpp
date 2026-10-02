@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "libc/cpu_clock.h"
+
 #include <array>
 #include <barrier>
 #include <cerrno>
@@ -53,11 +55,8 @@ TEST(RuntimeLibc, ConcurrentAllocationAndStdio)
                     break;
                 }
 
-                const int written{ std::snprintf(buffer,
-                                                 buffer_size,
-                                                 "worker=%zu iteration=%zu\n",
-                                                 worker_id,
-                                                 iteration) };
+                const int written{ std::snprintf(
+                  buffer, buffer_size, "worker=%zu iteration=%zu\n", worker_id, iteration) };
                 if (written < 0 || static_cast<std::size_t>(written) >= buffer_size) {
                     std::free(buffer);
                     worker_passed = false;
@@ -119,6 +118,33 @@ TEST(RuntimeLibc, RetargetedGettimeofdayUsesRealtimeClock)
     EXPECT_LE(value.tv_sec, after + 1);
     EXPECT_GE(value.tv_usec, 0);
     EXPECT_LT(value.tv_usec, 1'000'000);
+}
+
+TEST(RuntimeLibc, CpuClockAccumulatesShortRunsAndExcludesIdleAcrossCounterWrap)
+{
+    runtime_cpu_clock_counter counter{};
+    counter.last_cycle = UINT32_MAX - 99U;
+    counter.running = true;
+    runtime_cpu_clock_update(&counter, 50U);
+    EXPECT_EQ(counter.execution_cycles, 150U);
+    counter.running = false;
+    runtime_cpu_clock_update(&counter, 1050U);
+    EXPECT_EQ(counter.execution_cycles, 150U);
+    EXPECT_EQ(counter.elapsed_cycles, 1150U);
+    counter.running = true;
+    for (std::uint32_t cycle{ 1051U }; cycle <= 1100U; ++cycle) {
+        runtime_cpu_clock_update(&counter, cycle);
+    }
+    EXPECT_EQ(counter.execution_cycles, 200U);
+    EXPECT_EQ(runtime_cpu_clock_ticks(counter.execution_cycles, 1000U, 100U), 20U);
+    EXPECT_EQ(runtime_cpu_clock_ticks(counter.elapsed_cycles, 1000U, 100U), 120U);
+
+    counter.running = false;
+    runtime_cpu_clock_update(&counter, UINT32_MAX);
+    runtime_cpu_clock_update(&counter, 499U);
+    EXPECT_EQ(counter.execution_cycles, 200U);
+    EXPECT_GT(counter.elapsed_cycles, UINT32_MAX);
+    EXPECT_EQ(runtime_cpu_clock_ticks(480'000'000ULL * 60U + 240'000'000U, 480'000'000U, 100U), 6050U);
 }
 
 #if defined(HAL_PLATFORM_LINUX)

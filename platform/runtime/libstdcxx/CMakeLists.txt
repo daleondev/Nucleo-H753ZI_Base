@@ -1,14 +1,10 @@
 add_library(runtime_libstdcxx STATIC)
 add_library(runtime::libstdcxx ALIAS runtime_libstdcxx)
 
-if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
-    set(RUNTIME_LIBSTDCXX_VENDOR_VERSION gcc-15.2.0)
-else()
-    set(RUNTIME_LIBSTDCXX_VENDOR_VERSION gcc-16.1.0)
-endif()
-
+# The vendored filesystem and atomic sources are identical in GCC 16.1
+# and 16.2, so both toolchains use the same source snapshot.
 set(RUNTIME_LIBSTDCXX_VENDOR_DIR
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/${RUNTIME_LIBSTDCXX_VENDOR_VERSION}
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/gcc-16
 )
 
 target_sources(runtime_libstdcxx
@@ -36,18 +32,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     )
 endif()
 
-if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
-    # GCC 16 moved atomic wait/notify helpers out of the headers. Build the
-    # matching implementation against this runtime's gthreads port: the Arm
-    # archive omits it, while the Linux library's copy uses pthreads directly.
-    target_sources(runtime_libstdcxx
-        PRIVATE
-            ${RUNTIME_LIBSTDCXX_VENDOR_DIR}/c++20/atomic.cc
-    )
-endif()
+# GCC 16 moved atomic wait/notify helpers out of the headers. Build the
+# matching implementation against this runtime's gthreads port: the Arm
+# archive omits it, while the Linux library's copy uses pthreads directly.
+target_sources(runtime_libstdcxx
+    PRIVATE
+        ${RUNTIME_LIBSTDCXX_VENDOR_DIR}/c++20/atomic.cc
+)
 
 target_include_directories(runtime_libstdcxx
     BEFORE PUBLIC
+        ${PROJECT_SOURCE_DIR}/platform
         ${PROJECT_SOURCE_DIR}/platform/runtime
         $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:${RUNTIME_LIBSTDCXX_VENDOR_DIR}>
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -74,6 +69,7 @@ target_compile_definitions(runtime_libstdcxx
         _GLIBCXX_HAS_GTHREADS=1
         _GLIBCXX_HAVE_POSIX_SEMAPHORE=1
         _GLIBCXX_USE_SCHED_YIELD=1
+        $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Generic>:RUNTIME_LIBSTDCXX_HAVE_TLS=1>
 )
 
 # Keep the automatic runtime hook and the replacement guard ABI in the final

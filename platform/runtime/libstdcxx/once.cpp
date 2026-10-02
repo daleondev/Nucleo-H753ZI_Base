@@ -3,7 +3,7 @@
 #include <utility>
 
 // libstdc++ omits these ABI objects when built with the Arm "single" thread
-// model. The definitions mirror GCC 15's mutex.cc while using our gthread
+// model. The definitions mirror libstdc++'s mutex.cc while using our gthread
 // implementation underneath.
 // NOLINTBEGIN(bugprone-reserved-identifier,cppcoreguidelines-avoid-non-const-global-variables,readability-identifier-naming)
 namespace std _GLIBCXX_VISIBILITY(default)

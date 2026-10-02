@@ -101,12 +101,8 @@ namespace std _GLIBCXX_VISIBILITY(default)
         runtime::detail::SemaphoreHandle m_semaphore{};
     };
 
-#if _GLIBCXX_RELEASE == 15
-    using __semaphore_impl = __threadx_semaphore;
-#elif _GLIBCXX_RELEASE == 16
     template<ptrdiff_t>
     using _Semaphore_impl = __threadx_semaphore;
-#endif
 
     _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace std

@@ -1,11 +1,10 @@
 #include "hal/hal.hpp"
+#include "hal/linux/console.hpp"
 
-#include <cassert>
 #include <cerrno>
 #include <cstddef>
-#include <cstdio>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <unistd.h>
@@ -17,10 +16,7 @@ namespace
         std::string line{ "[sim][hal] " };
         line.append(message);
         line.push_back('\n');
-        const auto written{ std::fwrite(line.data(), sizeof(char), line.size(), stdout) };
-        assert(written == line.size());
-        static_cast<void>(written);
-        std::fflush(stdout);
+        linux_console::publish(linux_console::Channel::hal, line);
     }
 
     auto panic_write(const char* text) noexcept -> void
@@ -105,6 +101,10 @@ extern "C" [[gnu::weak, gnu::noinline, noreturn]] void hal_panic_handler(
 {
     panic_write("[hal][panic] ");
     panic_write(info != nullptr && info->message != nullptr ? info->message : "fatal error");
+    if (info != nullptr && info->detail != nullptr) {
+        panic_write(": ");
+        panic_write(info->detail);
+    }
     if (info != nullptr && info->file != nullptr) {
         panic_write("\n  at ");
         panic_write(info->file);

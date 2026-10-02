@@ -35,7 +35,7 @@ namespace
     // GCC's Arm bare-metal configuration uses the emutls ABI in GCC 16. This
     // ThreadX storage adaptation follows GCC's libgcc/emutls.c (FSF copyright
     // 2006-2026, GPLv3+ with GCC Runtime Library Exception 3.1); the license
-    // texts are retained under vendor/gcc-16.1.0/licenses. Keep this ABI layout
+    // texts are retained under vendor/gcc-16/licenses. Keep this ABI layout
     // synchronized with that source.
     struct EmutlsObject
     {
