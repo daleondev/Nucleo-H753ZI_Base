@@ -61,8 +61,8 @@ HAL or Linux debugger. Startup diagnostics and the boot message appear on the te
 
 ## Storage and external wiring
 
-Hardware startup requires at least one readable storage volume. Full hardware
-conformance requires both the W25Q128 NOR module and an existing FAT SD card;
+Hardware startup continues without readable storage by default; file access
+then fails with `ENODEV`. Full hardware conformance requires both the W25Q128 NOR module and an existing FAT SD card;
 the reference SD self-test expects a card of at least 8 GiB.
 
 | Device signal | STM32 pin |
@@ -225,3 +225,135 @@ SP-alias warning when unwinding the suspended timer thread.
 
 Detailed machine-readable results are retained at `build/validation/summary.json`
 and in the per-configuration validation directories.
+
+
+## Optional storage startup
+
+`RUNTIME_STORAGE_REQUIRED=OFF` is the default. Startup attempts the external
+NOR and SD volumes once per boot, including the existing SD fallback attempts.
+If neither mounts, the runtime prints
+`[storage] unavailable; file access disabled` once and enters the application.
+Serial input/output, ThreadX scheduling, GPIO, and other peripherals remain
+available. Missing, corrupt, unsupported, and failed media all follow this
+policy; diagnostics retain the original mount/driver errors.
+
+With one mounted volume, its file access works normally. `/flash` is preferred
+as the initial directory, otherwise `/sd`. Requests for an unavailable volume
+fail with `ENODEV`. With neither mounted, file and directory operations,
+metadata, space queries, and current-directory queries fail with `ENODEV`;
+no RAM filesystem or pretend working directory is supplied.
+
+Use `runtime::filex::initialized()`, `runtime::storage::mounted(Volume)`, and
+`runtime::storage::diagnostics()` to select application behavior. `fopen()` may
+return null and C++ file streams may enter a failure state. Use filesystem
+error-code overloads or catch exceptions; unhandled exceptions still panic.
+For example:
+
+```cpp
+std::error_code error;
+const auto available = std::filesystem::space("/flash", error);
+if (error) {
+    // Continue with features that do not require persistent storage.
+}
+```
+
+Initialization, including a failed attempt, is cached. Repeated calls do not
+retry devices, reset FileX, recreate mutexes, or repeat the warning. Initialization
+is a startup operation, not a concurrent mount API. Connecting storage later
+requires resetting the board. Live removal and automatic remounting are not
+supported. Direct FileX callers must check that their volume is mounted.
+
+Applications requiring persistent storage can opt into a deliberate startup
+stop when neither volume mounts:
+
+```sh
+cmake --preset debug-stm32 -DRUNTIME_STORAGE_REQUIRED=ON
+cmake --build --preset debug-stm32
+```
+
+The panic message is `Persistent storage required but no volume is available`.
+The runtime and serial/persistence conformance presets explicitly require
+storage. Core initialization failures, such as mutex creation failure, remain
+fatal. Physical SD cards are never automatically formatted, invalid media are
+not automatically erased, and `RUNTIME_STORAGE_ERASE_FLASH_ON_BOOT` stays OFF.
+
+Normal Linux application I/O continues to use the host filesystem, including
+when FileX storage is configured as required. The option applies only when
+FileX initialization is requested; isolated probes use disposable simulated
+media and the explicit FileX adapters.
+
+### Storage startup validation
+
+The Linux startup probe covers both volumes, either volume, neither volume,
+corrupt media, valid media paired with corrupt media, and console-warning
+failure. Each case runs in its own process. Run it with either policy:
+
+```sh
+cmake --preset debug-linux -B build/storage-optional-debug-linux -DRUNTIME_STORAGE_REQUIRED=OFF
+cmake --build build/storage-optional-debug-linux --parallel 8
+ctest --test-dir build/storage-optional-debug-linux --output-on-failure
+cmake --preset release-linux -B build/storage-required-release-linux -DRUNTIME_STORAGE_REQUIRED=ON
+cmake --build build/storage-required-release-linux --parallel 8
+ctest --test-dir build/storage-required-release-linux --output-on-failure
+```
+
+The dedicated board probe checks C stdio, C++ streams, filesystem errors,
+directory access, repeated initialization, and serial echo around ten seconds
+of LED heartbeat and ThreadX progress. Injected tests suppress volumes before
+device access; this mechanism exists only in the test image:
+
+```sh
+scripts/run_hardware_self_test.sh --storage-startup --storage-volumes none
+scripts/run_hardware_self_test.sh --storage-startup --storage-volumes flash
+scripts/run_hardware_self_test.sh --storage-startup --storage-volumes sd
+scripts/run_hardware_self_test.sh --storage-startup --storage-volumes both
+scripts/run_hardware_self_test.sh --storage-startup --storage-volumes none --storage-required --configuration Release
+```
+
+To exercise real detection/timeouts, power down before changing external
+wiring, reconnect ST-Link, then select the expected physical configuration:
+
+```sh
+scripts/run_hardware_self_test.sh --storage-startup --storage-physical --storage-volumes none
+```
+
+Repeat with `flash`, `sd`, and `both`, and with Debug/Release and optional/required
+policies. Physical mode always probes both devices. Reports distinguish physical
+and injected results; injected results do not prove missing-device detection.
+The runner defaults to a 60-second execution timeout, captures UART before
+reset, and records startup time, mounted volumes, heartbeat, panic/status, and
+compiler/debugger versions. `RUNTIME_TEST_SERIAL_PORT` overrides ST-Link serial
+selection; capture uses 115200 baud, 8N1. Reports reside beneath
+`build/storage-startup-test-stm32-<debug|release>-<optional|required>/validation/`.
+
+After testing, reconnect storage and restore normal firmware:
+
+```sh
+cmake --preset debug-stm32
+cmake --build --preset debug-stm32
+```
+
+Flash `build/debug-stm32/Application.elf` with the existing STM32 task/debug
+configuration and the dual-bank OpenOCD target. Test images are mutually
+exclusive and normal builds contain no volume-suppression symbols.
+
+This policy is an intentional difference from the reference runtime, which
+required at least one mounted volume. No dependency or on-media format changed.
+
+The pinned STM32 HAL SD driver receives a reviewed build-copy patch adding
+a five-second elapsed-time check to operating-voltage negotiation.
+The original trial limit and four-bit/one-bit fallback remain active. Without
+this elapsed-time bound, an absent card can spend about 76 seconds negotiating
+across both attempts. The patch is in
+`platform/runtime/libc/patches/stm32-sd-power-on-deadline.patch`; CMake verifies
+both original and patched checksums and leaves the vendor submodule unchanged.
+This is an additional intentional difference from the reference runtime.
+
+Startup probes use only reserved `nucleo-storage-startup-*` files and directories
+on each volume and refuse to replace existing fixtures. If a probe is interrupted,
+inspect and remove its leftover fixtures before rerunning; never remove unrelated
+application data. Reruns archive earlier UART/debugger/results under the case's
+`history/` directory. Reports include the flashed ELF's SHA-256 checksum.
+
+[Storage validation results](platform/runtime/STORAGE_VALIDATION.md) record passing checks and the physical
+configurations that remain untested.
